@@ -54,3 +54,19 @@ void Display::SetTheme(Theme* theme) {
 void Display::SetPowerSaveMode(bool on) {
     ESP_LOGW(TAG, "SetPowerSaveMode: %d", on);
 }
+
+void Display::SetIdleScreenVisible(bool visible) {
+    ESP_LOGW(TAG, "SetIdleScreenVisible: %d", visible);
+}
+
+void Display::SetWallpaper(const char* path) {
+    ESP_LOGW(TAG, "SetWallpaper called");
+}
+
+void Display::SetWallpaper(std::unique_ptr<LvglImage> image) {
+    ESP_LOGW(TAG, "SetWallpaper called");
+}
+
+bool Display::RandomChangeWallpaper() { return false; }
+
+void Display::AddWallpaperToCollection(const std::string& url) {}

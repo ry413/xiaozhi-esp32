@@ -120,6 +120,7 @@ public:
      */
     void ResetProtocol();
 
+    bool GetWallpapers();
 private:
     Application();
     ~Application();

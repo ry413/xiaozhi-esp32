@@ -811,4 +811,11 @@ menu "TAIJIPAI_S3_CONFIG"
         启动双声道
 endmenu
 
+config WALLPAPER_SHARED_SECRET
+    string "Wallpaper Shared Secret"
+    default "YourSharedSecretHere"
+    help
+        Shared secret used for wallpaper download authentication
+
+
 endmenu

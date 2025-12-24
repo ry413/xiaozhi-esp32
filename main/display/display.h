@@ -40,6 +40,12 @@ public:
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
 
+    virtual void SetIdleScreenVisible(bool visible);
+    virtual void SetWallpaper(const char* path);
+    virtual void SetWallpaper(std::unique_ptr<LvglImage> image);
+    virtual void AddWallpaperToCollection(const std::string& url);
+    virtual bool RandomChangeWallpaper();
+
     inline int width() const { return width_; }
     inline int height() const { return height_; }
 
