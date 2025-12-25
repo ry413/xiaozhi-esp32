@@ -292,6 +292,7 @@ void Application::HandleNetworkConnectedEvent() {
 
     GetWallpapers();
     display->RandomChangeWallpaper();
+    display->SetIdleScreenVisible(true);
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
@@ -807,6 +808,7 @@ void Application::HandleWakeWordDetectedEvent() {
 }
 
 void Application::HandleStateChangedEvent() {
+    ESP_LOGW(TAG, "Device state changed to %s", state_machine_.GetStateName(state_machine_.GetState()));
     DeviceState new_state = state_machine_.GetState();
     clock_ticks_ = 0;
 
@@ -822,6 +824,7 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+            display->SetIdleScreenVisible(true);
             board.GetMusic()->Resume();
             break;
         case kDeviceStateConnecting:
@@ -832,6 +835,7 @@ void Application::HandleStateChangedEvent() {
         case kDeviceStateListening:
             display->SetStatus(Lang::Strings::LISTENING);
             display->SetEmotion("neutral");
+            display->SetIdleScreenVisible(false);
 
             // Make sure the audio processor is running
             if (!audio_service_.IsAudioProcessorRunning()) {
