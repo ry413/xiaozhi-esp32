@@ -120,7 +120,7 @@ public:
      */
     void ResetProtocol();
 
-    bool GetWallpapers();
+    void AddAudioData(AudioStreamPacket&& packet);
 private:
     Application();
     ~Application();

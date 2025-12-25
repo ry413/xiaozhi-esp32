@@ -9,7 +9,6 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
-#include "mbedtls/md.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -273,6 +272,12 @@ void Application::HandleNetworkConnectedEvent() {
             Application* app = static_cast<Application*>(arg);
             app->ActivationTask();
             app->activation_task_handle_ = nullptr;
+
+            auto display = Board::GetInstance().GetDisplay();
+            display->GetWallpapers();
+            display->RandomChangeWallpaper();
+            display->SetIdleScreenVisible(true);
+            display->UpdateStatusBar(true);
             vTaskDelete(NULL);
         }, "activation", 4096 * 2, this, 2, &activation_task_handle_);
     }
@@ -281,9 +286,6 @@ void Application::HandleNetworkConnectedEvent() {
     auto display = Board::GetInstance().GetDisplay();
     display->UpdateStatusBar(true);
 
-    GetWallpapers();
-    display->RandomChangeWallpaper();
-    display->SetIdleScreenVisible(true);
 }
 
 void Application::HandleNetworkDisconnectedEvent() {
@@ -1059,137 +1061,4 @@ void Application::ResetProtocol() {
         // Reset protocol
         protocol_.reset();
     });
-}
-
-static std::string HmacSha256Hex(const std::string& key, const std::string& data) {
-    const mbedtls_md_info_t* info = mbedtls_md_info_from_type(MBEDTLS_MD_SHA256);
-    if (!info) {
-        ESP_LOGE("HMAC", "mbedtls_md_info_from_type failed");
-        return {};
-    }
-
-    unsigned char out[32];
-    mbedtls_md_context_t ctx;
-    mbedtls_md_init(&ctx);
-
-    int ret = mbedtls_md_setup(&ctx, info, 1);
-    if (ret != 0) {
-        ESP_LOGE("HMAC", "mbedtls_md_setup failed: %d", ret);
-        mbedtls_md_free(&ctx);
-        return {};
-    }
-
-    ret = mbedtls_md_hmac_starts(&ctx,
-                                 reinterpret_cast<const unsigned char*>(key.data()),
-                                 key.size());
-    if (ret != 0) {
-        ESP_LOGE("HMAC", "mbedtls_md_hmac_starts failed: %d", ret);
-        mbedtls_md_free(&ctx);
-        return {};
-    }
-
-    ret = mbedtls_md_hmac_update(&ctx,
-                                 reinterpret_cast<const unsigned char*>(data.data()),
-                                 data.size());
-    if (ret != 0) {
-        ESP_LOGE("HMAC", "mbedtls_md_hmac_update failed: %d", ret);
-        mbedtls_md_free(&ctx);
-        return {};
-    }
-
-    ret = mbedtls_md_hmac_finish(&ctx, out);
-    if (ret != 0) {
-        ESP_LOGE("HMAC", "mbedtls_md_hmac_finish failed: %d", ret);
-        mbedtls_md_free(&ctx);
-        return {};
-    }
-
-    mbedtls_md_free(&ctx);
-
-    std::string hex;
-    hex.reserve(64);
-    char buf[3];
-    for (int i = 0; i < 32; ++i) {
-        snprintf(buf, sizeof(buf), "%02x", out[i]);
-        hex.append(buf);
-    }
-    return hex;
-}
-
-bool Application::GetWallpapers() {
-    auto& board = Board::GetInstance();
-    auto network = board.GetNetwork();
-    auto http = network->CreateHttp(0);
-
-    // 1. 准备 auth 相关字段
-    std::string mac = SystemInfo::GetMacAddress();
-    int64_t ts = static_cast<int64_t>(time(nullptr));
-    std::string ts_str = std::to_string(ts);
-
-    std::string sign_payload = mac + ":" + ts_str;
-    std::string sign_hex = HmacSha256Hex(CONFIG_WALLPAPER_SHARED_SECRET, sign_payload);
-
-    ESP_LOGI(TAG, "Wallpapers auth mac=%s ts=%s sign=%s",
-             mac.c_str(), ts_str.c_str(), sign_hex.c_str());
-
-    // 2. 塞 HTTP 头
-    http->SetHeader("X-Device-Id", mac.c_str());
-    http->SetHeader("X-Device-Ts", ts_str.c_str());
-    http->SetHeader("X-Device-Sign", sign_hex.c_str());
-
-    std::string url = "http://192.168.2.27:8002/xiaozhi/wallpaper/device-batch";
-    std::string data;  // 空 body
-    std::string method = "GET";
-    http->SetContent(std::move(data));
-
-    if (!http->Open(method, url)) {
-        ESP_LOGE(TAG, "Failed to open HTTP connection");
-        return false;
-    }
-
-    auto status_code = http->GetStatusCode();
-    if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to get wallpapers, status code: %d", status_code);
-        http->Close();
-        return false;
-    }
-
-    std::string resp = http->ReadAll();
-    http->Close();
-
-    // ESP_LOGI(TAG, "Wallpapers response: %s", resp.c_str());
-
-    // 3. 解析 JSON
-    // { "data": [ { "id": 1, "url": "http://..." }, ... ] }
-    cJSON* root = cJSON_Parse(resp.c_str());
-    if (root == nullptr) {
-        ESP_LOGE(TAG, "Failed to parse JSON response");
-        return false;
-    }
-
-    cJSON* dataNode = cJSON_GetObjectItem(root, "data");
-    if (!cJSON_IsArray(dataNode)) {
-        ESP_LOGE(TAG, "No 'data' array in response");
-        cJSON_Delete(root);
-        return false;
-    }
-
-    cJSON* item = nullptr;
-    auto display = board.GetDisplay();
-    cJSON_ArrayForEach(item, dataNode) {
-        cJSON* idNode = cJSON_GetObjectItem(item, "id");
-        cJSON* urlNode = cJSON_GetObjectItem(item, "url");
-        if (!cJSON_IsNumber(idNode) || !cJSON_IsString(urlNode)) {
-            continue;
-        }
-
-        int id = idNode->valueint;
-        const char* wurl = urlNode->valuestring;
-
-        ESP_LOGI(TAG, "Wallpaper: id=%d url=%s", id, wurl);
-        display->AddWallpaperToCollection(std::string(wurl));
-    }
-
-    cJSON_Delete(root);
-    return true;
 }
