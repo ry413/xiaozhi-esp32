@@ -129,8 +129,9 @@ private:
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
-                ResetWifiConfiguration();
+            if (app.GetDeviceState() == kDeviceStateStarting) {
+                EnterWifiConfigMode();
+                return;
             }
             app.ToggleChatState();
         });
@@ -160,7 +161,7 @@ private:
         boot_button_.OnLongPress([this]() {
             auto& app = Application::GetInstance();
             app.SetDeviceState(kDeviceStateWifiConfiguring);
-            ResetWifiConfiguration();
+            EnterWifiConfigMode();
         });
 
         volume_up_button_.OnClick([this]() {
@@ -178,10 +179,6 @@ private:
             ESP_LOGW(TAG, "volume_up_button_.OnLongPress!");
             GetAudioCodec()->SetOutputVolume(100);
             GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
-        });
-
-        volume_up_button_.OnDoubleClick([this]() {
-            ResetWifiConfiguration();
         });
 
         volume_down_button_.OnClick([this]() {
@@ -262,18 +259,6 @@ private:
 
     void InitializeTools() {
         auto &mcp_server = McpServer::GetInstance();
-        mcp_server.AddUserOnlyTool("self.direct_chat",
-            "直接向后端LLM发送消息",
-            PropertyList({
-                Property("message", kPropertyTypeString)
-            }),
-            [this](const PropertyList& properties) -> ReturnValue {
-                auto message = properties["message"].value<std::string>();
-                ESP_LOGI(TAG, "Direct chat message: %s", message.c_str());
-                auto& app = Application::GetInstance();
-                app.SendChatMessage(message);
-                return true;
-        });
         mcp_server.AddUserOnlyTool("self.audio_speaker.set_gain", 
             "设置麦克风输入增益，范围0-100",
             PropertyList({
@@ -298,14 +283,14 @@ private:
                     Property("song_name", kPropertyTypeString, ""),
                     Property("artist_name", kPropertyTypeString, "")
                 }),
-                [music](const PropertyList& properties) -> ReturnValue {
+                [this](const PropertyList& properties) -> ReturnValue {
                     auto song_name = properties["song_name"].value<std::string>();
                     auto artist_name = properties["artist_name"].value<std::string>();
                     
-                    if (!music->Download(song_name, artist_name)) {
+                    if (!music_->Download(song_name, artist_name)) {
                         return "{\"success\": false, \"message\": \"获取音乐资源失败\"}";
                     }
-                    auto download_result = music->GetDownloadResult();
+                    auto download_result = music_->GetDownloadResult();
                     ESP_LOGI(TAG, "Music details result: %s", download_result.c_str());
                     return "{\"success\": true, \"message\": \"音乐开始播放\"}";
                 });
