@@ -57,12 +57,10 @@ Application::~Application() {
 
 bool Application::SetDeviceState(DeviceState state) {
     // 当从idle状态变成其他任何状态时, 停止电台或暂停音乐
-    DeviceState previous_state = state_machine_.GetState();
+    DeviceState previous_state = GetDeviceState();
     if (previous_state == kDeviceStateIdle && state != kDeviceStateIdle) {
-        auto music = board.GetMusic();
+        auto music = Board::GetInstance().GetMusic();
         if (music) {
-            ESP_LOGI(TAG, "Stopping music streaming due to state change: %s -> %s", 
-                    STATE_STRINGS[previous_state], STATE_STRINGS[state]);
             music->Pause();
         }
     }
@@ -1200,4 +1198,60 @@ bool Application::GetWallpapers() {
 
     cJSON_Delete(root);
     return true;
+}
+
+void Application::AddAudioData(AudioStreamPacket&& packet) {
+    auto codec = Board::GetInstance().GetAudioCodec();
+    codec->EnableOutput(true);
+    DeviceState device_state_ = GetDeviceState();
+
+    // 固定重采样到codec->output_sample_rate()
+    if (device_state_ == kDeviceStateIdle) {
+        if (packet.payload.size() >= 2) {
+            size_t num_samples = packet.payload.size() / sizeof(int16_t);
+            std::vector<int16_t> pcm_data(num_samples);
+            memcpy(pcm_data.data(), packet.payload.data(), packet.payload.size());
+
+            int src_rate = packet.sample_rate;
+            int dst_rate = codec->output_sample_rate();
+
+            if (src_rate <= 0 || dst_rate <= 0) {
+                ESP_LOGE(TAG, "Invalid sample rates: %d -> %d", src_rate, dst_rate);
+                return;
+            }
+
+            if (src_rate != dst_rate) {
+
+                // 比例 = 目标 / 源
+                float ratio = dst_rate / static_cast<float>(src_rate);
+                size_t out_samples =
+                    static_cast<size_t>(num_samples * ratio + 0.5f);
+
+                std::vector<int16_t> resampled(out_samples);
+
+                for (size_t i = 0; i < out_samples; ++i) {
+                    // 源位置（浮点），单位：样本索引
+                    float src_pos = i / ratio;   // 等价于 i * src_rate / dst_rate
+                    size_t idx = static_cast<size_t>(src_pos);
+                    float frac = src_pos - idx;
+
+                    int16_t s0 = pcm_data[std::min(idx, num_samples - 1)];
+                    int16_t s1 = pcm_data[std::min(idx + 1, num_samples - 1)];
+
+                    float v = s0 + (s1 - s0) * frac;
+
+                    // 简单裁剪到 int16_t
+                    if (v > 32767.0f) v = 32767.0f;
+                    if (v < -32768.0f) v = -32768.0f;
+                    resampled[i] = static_cast<int16_t>(v);
+                }
+
+                pcm_data.swap(resampled);
+            }
+
+            // 现在 pcm_data 里已经是 dst_rate(24000) 的 PCM 了
+            codec->OutputData(pcm_data);
+            audio_service_.UpdateOutputTimestamp();
+        }
+    }
 }

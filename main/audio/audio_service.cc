@@ -684,3 +684,7 @@ bool AudioService::IsAfeWakeWord() {
     return false;
 #endif
 }
+
+void AudioService::UpdateOutputTimestamp() {
+    last_output_time_ = std::chrono::steady_clock::now();
+}

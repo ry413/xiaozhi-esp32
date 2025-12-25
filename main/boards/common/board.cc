@@ -62,6 +62,10 @@ Camera* Board::GetCamera() {
     return nullptr;
 }
 
+Esp32Music* Board::GetMusic() {
+    return nullptr;
+}
+
 Led* Board::GetLed() {
     static NoLed led;
     return &led;

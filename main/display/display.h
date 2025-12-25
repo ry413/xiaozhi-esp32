@@ -46,6 +46,14 @@ public:
     virtual void AddWallpaperToCollection(const std::string& url);
     virtual bool RandomChangeWallpaper();
 
+    virtual void SetMusicInfoVisible(bool visible) {}
+    virtual void SetMusicInfo(const char* text) {}
+    virtual void SetMusicLyricsVisible(bool visible) {}
+    virtual void SetMusicLyrics(const char* lyric) {}
+    virtual void StartFft() {}  // 启动FFT显示
+    virtual void ClearScreen() {}  // 清除FFT的显示内容
+    virtual void StopFft() {}   // 停止FFT显示
+
     inline int width() const { return width_; }
     inline int height() const { return height_; }
 
