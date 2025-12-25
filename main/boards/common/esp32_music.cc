@@ -191,10 +191,10 @@ Esp32Music::~Esp32Music() {
 }
 
 bool Esp32Music::Download(const std::string& song_name, const std::string& artist_name) {
+    ESP_LOGI(TAG, "Starting to get music details for: %s", song_name.c_str());
     auto display = Board::GetInstance().GetDisplay();
     // display->SetMusicInfoVisible(true);
     display->SetChatMessage("assistant", "正在搜索...");
-    ESP_LOGI(TAG, "Starting to get music details for: %s", song_name.c_str());
 
     last_downloaded_data_.clear();
 
