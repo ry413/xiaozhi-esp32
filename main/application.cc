@@ -56,6 +56,17 @@ Application::~Application() {
 }
 
 bool Application::SetDeviceState(DeviceState state) {
+    // 当从idle状态变成其他任何状态时, 停止电台或暂停音乐
+    DeviceState previous_state = state_machine_.GetState();
+    if (previous_state == kDeviceStateIdle && state != kDeviceStateIdle) {
+        auto music = board.GetMusic();
+        if (music) {
+            ESP_LOGI(TAG, "Stopping music streaming due to state change: %s -> %s", 
+                    STATE_STRINGS[previous_state], STATE_STRINGS[state]);
+            music->Pause();
+        }
+    }
+
     return state_machine_.TransitionTo(state);
 }
 
@@ -813,6 +824,7 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+            board.GetMusic()->Resume();
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
