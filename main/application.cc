@@ -1073,7 +1073,6 @@ void Application::ResetProtocol() {
     });
 }
 
-
 void Application::AddAudioData(AudioStreamPacket&& packet) {
     auto codec = Board::GetInstance().GetAudioCodec();
     codec->EnableOutput(true);

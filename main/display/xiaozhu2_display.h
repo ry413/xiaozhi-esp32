@@ -83,6 +83,8 @@ public:
                   bool mirror_x, bool mirror_y, bool swap_xy);
     virtual void SetEmotion(const char* emotion) override {};
     virtual void UpdateStatusBar(bool update_all = false) override;
+
+    virtual bool GetWallpapers() override;
     virtual void SetIdleScreenVisible(bool visible) override;
     virtual void SetWallpaper(const char* path) override;
     virtual void SetWallpaper(std::unique_ptr<LvglImage> image) override;
