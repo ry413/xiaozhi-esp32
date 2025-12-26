@@ -1031,6 +1031,14 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
+void Application::SendDirectMessageToChat(const std::string& message) {
+    Schedule([this, message = std::move(message)]() {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->SendDirectMessageToChat(message);
+        }
+    });
+}
+
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {
