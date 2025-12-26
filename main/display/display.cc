@@ -55,9 +55,9 @@ void Display::SetPowerSaveMode(bool on) {
     ESP_LOGW(TAG, "SetPowerSaveMode: %d", on);
 }
 
-void Display::SetIdleScreenVisible(bool visible) {
-    ESP_LOGW(TAG, "SetIdleScreenVisible: %d", visible);
-}
+bool Display::GetWallpapers() { return false; }
+
+void Display::SetIdleScreenVisible(bool visible) { ESP_LOGW(TAG, "SetIdleScreenVisible: %d", visible); }
 
 void Display::SetWallpaper(const char* path) {
     ESP_LOGW(TAG, "SetWallpaper called");
