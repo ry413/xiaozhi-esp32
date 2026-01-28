@@ -178,8 +178,7 @@ void WifiBoard::StartWifiConfigMode() {
 
         Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, hint.c_str(), "gear", Lang::Sounds::OGG_WIFICONFIG);
     });
-#endif
-#if CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
+#elif CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
     auto &blufi = Blufi::GetInstance();
     // Set device name based on MAC address
     auto& wifi_manager = WifiManager::GetInstance();
