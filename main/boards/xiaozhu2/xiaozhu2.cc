@@ -25,6 +25,7 @@
 #include <esp_vfs_fat.h>
 #include <driver/sdmmc_host.h>
 
+#include <ssid_manager.h>
 
 #define FIRST_BOOT_NS "boot_config"  
 #define FIRST_BOOT_KEY "is_first"    
@@ -176,9 +177,8 @@ private:
         });
 
         volume_up_button_.OnLongPress([this]() {
-            ESP_LOGW(TAG, "volume_up_button_.OnLongPress!");
-            GetAudioCodec()->SetOutputVolume(100);
-            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+            // GetAudioCodec()->SetOutputVolume(100);
+            // GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
         });
 
         volume_down_button_.OnClick([this]() {
@@ -267,6 +267,15 @@ private:
             [this](const PropertyList& properties) -> ReturnValue {
                 auto codec = GetAudioCodec();
                 codec->SetInputGain(properties["gain"].value<int>());
+                return true;
+        });
+
+        mcp_server.AddUserOnlyTool("self.clear_wifi_credentials",
+            "清除所有已保存的WiFi网络凭据，下次启动时需要重新配置WiFi。",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                SsidManager::GetInstance().Clear();
+                ESP_LOGI(TAG, "Cleared all WiFi credentials");
                 return true;
         });
         

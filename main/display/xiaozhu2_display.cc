@@ -753,7 +753,7 @@ bool Xiaozhu2Display::GetWallpapers() {
     http->SetHeader("X-Device-Ts", ts_str.c_str());
     http->SetHeader("X-Device-Sign", sign_hex.c_str());
 
-    std::string url = "http://192.168.2.27:8002/xiaozhi/wallpaper/device-batch";
+    std::string url = "http://192.168.2.26:8002/xiaozhi/wallpaper/device-batch";
     std::string data;  // 空 body
     std::string method = "GET";
     http->SetContent(std::move(data));

@@ -20,6 +20,7 @@
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
 #include "blufi.h"
 #endif
+#include <esp_mac.h>
 
 static const char *TAG = "WifiBoard";
 
@@ -110,6 +111,8 @@ void WifiBoard::OnNetworkEvent(NetworkEvent event, const std::string& data) {
             // Stop timeout timer
             esp_timer_stop(connect_timer_);
 #ifdef CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
+            // 通知小程序端连接成功, 再把wifi的mac发过去
+            Blufi::GetInstance().sendCustomInfo(("{\"type\":\"ESP_BLUFI_STA_CONN_SUCCESS\",\"wifiMac\":\"" + SystemInfo::GetMacAddress() + "\"}").c_str());
             // make sure blufi resources has been released
             Blufi::GetInstance().deinit();
 #endif
@@ -178,6 +181,18 @@ void WifiBoard::StartWifiConfigMode() {
 #endif
 #if CONFIG_USE_ESP_BLUFI_WIFI_PROVISIONING
     auto &blufi = Blufi::GetInstance();
+    // Set device name based on MAC address
+    auto& wifi_manager = WifiManager::GetInstance();
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+    char device_name[32];
+    snprintf(device_name, sizeof(device_name), "%s-%02X%02X", wifi_manager.GetConfig().ssid_prefix.c_str(), mac[4], mac[5]);
+    blufi.setDeviceName(device_name);
+
+    Application::GetInstance().Schedule([device_name]() {
+        Application::GetInstance().Alert(Lang::Strings::WIFI_CONFIG_MODE, device_name, "gear", Lang::Sounds::OGG_WIFICONFIG);
+    });
+
     // initialize esp-blufi protocol
     blufi.init();
 #endif

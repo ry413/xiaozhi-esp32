@@ -31,9 +31,14 @@ public:
     // Delete copy constructor and assignment operator for singleton
     Blufi(const Blufi &) = delete;
 
+    void setDeviceName(const char *name);
+
+    void sendCustomInfo(const char *info);
+
     Blufi &operator=(const Blufi &) = delete;
 
 private:
+    char m_device_name[32];
     bool inited_ = false;
 
     Blufi();

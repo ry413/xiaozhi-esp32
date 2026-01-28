@@ -71,6 +71,28 @@ void esp_blufi_btc_deinit(void);
 // Logging Tag
 static const char *BLUFI_TAG = "BLUFI_CLASS";
 
+static uint8_t blufi_service_uuid128[32] = {
+    /* LSB <--------------------------------------------------------------------------------> MSB */
+    //first uuid, 16bit, [12],[13] is the value
+    0xfb, 0x34, 0x9b, 0x5f, 0x80, 0x00, 0x00, 0x80, 0x00, 0x10, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
+};
+
+static esp_ble_adv_data_t blufi_adv_data = {
+    .set_scan_rsp = false,
+    .include_name = true,
+    .include_txpower = true,
+    .min_interval = 0x0006, //slave connection min interval, Time = min_interval * 1.25 msec
+    .max_interval = 0x0010, //slave connection max interval, Time = max_interval * 1.25 msec
+    .appearance = 0x00,
+    .manufacturer_len = 0,
+    .p_manufacturer_data =  NULL,
+    .service_data_len = 0,
+    .p_service_data = NULL,
+    .service_uuid_len = 16,
+    .p_service_uuid = blufi_service_uuid128,
+    .flag = 0x6,
+};
+
 static wifi_mode_t GetWifiModeWithFallback(const WifiManager &wifi) {
     if (wifi.IsConfigMode()) {
         return WIFI_MODE_AP;
@@ -156,6 +178,11 @@ esp_err_t Blufi::deinit() {
 #endif
     }
     return ret;
+}
+
+void Blufi::setDeviceName(const char *name) {
+    strncpy(m_device_name, name, sizeof(m_device_name) - 1);
+    m_device_name[sizeof(m_device_name) - 1] = '\0';
 }
 
 #ifdef CONFIG_BT_BLUEDROID_ENABLED
@@ -544,7 +571,8 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *para
     switch (event) {
         case ESP_BLUFI_EVENT_INIT_FINISH:
             ESP_LOGI(BLUFI_TAG, "BLUFI init finish");
-            esp_blufi_adv_start();
+            esp_ble_gap_set_device_name(m_device_name);
+            esp_ble_gap_config_adv_data(&blufi_adv_data);
             break;
         case ESP_BLUFI_EVENT_DEINIT_FINISH:
             ESP_LOGI(BLUFI_TAG, "BLUFI deinit finish");
@@ -560,7 +588,8 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *para
             m_ble_is_connected = false;
             _security_deinit();
             if (!m_provisioned) {
-                esp_blufi_adv_start();
+                esp_ble_gap_set_device_name(m_device_name);
+                esp_ble_gap_config_adv_data(&blufi_adv_data);
             } else {
                 esp_blufi_adv_stop();
                 if (!m_deinited) {
@@ -668,6 +697,7 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *para
                         esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_SUCCESS,
                                                         softap_conn_num, &info);
                         ESP_LOGI(BLUFI_TAG, "connected to WiFi");
+                        // 这里blufi已经断开了, 所以不在这发成功信息
 
                         // Close BluFi session after successful provisioning to free resources.
                         if (self->m_ble_is_connected) {
@@ -684,6 +714,7 @@ void Blufi::_handle_event(esp_blufi_cb_event_t event, esp_blufi_cb_param_t *para
                         esp_blufi_send_wifi_conn_report(mode, ESP_BLUFI_STA_CONN_FAIL,
                                                         softap_conn_num, &info);
                         ESP_LOGE(BLUFI_TAG, "Failed to connect to WiFi via esp-wifi-connect");
+                        self->sendCustomInfo("{\"type\":\"ESP_BLUFI_STA_CONN_FAIL\"}");
                     }
                     vTaskDelete(nullptr);
                 },
@@ -774,4 +805,9 @@ int Blufi::_decrypt_func_trampoline(uint8_t iv8, uint8_t *crypt_data, int crypt_
 
 uint16_t Blufi::_checksum_func_trampoline(uint8_t iv8, uint8_t *data, int len) {
     return _crc_checksum(iv8, data, len);
+}
+
+void Blufi::sendCustomInfo(const char *info) {
+    esp_blufi_send_custom_data(reinterpret_cast<uint8_t *>(const_cast<char *>(info)),
+                               strlen(info));
 }
