@@ -69,4 +69,4 @@ void Display::SetWallpaper(std::unique_ptr<LvglImage> image) {
 
 bool Display::RandomChangeWallpaper() { return false; }
 
-void Display::AddWallpaperToCollection(const std::string& url) {}
+void Display::AddWallpaperToCollection(const std::string& key) {}

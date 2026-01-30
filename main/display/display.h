@@ -44,7 +44,7 @@ public:
     virtual void SetIdleScreenVisible(bool visible);
     virtual void SetWallpaper(const char* path);
     virtual void SetWallpaper(std::unique_ptr<LvglImage> image);
-    virtual void AddWallpaperToCollection(const std::string& url);
+    virtual void AddWallpaperToCollection(const std::string& key);
     virtual bool RandomChangeWallpaper();
 
     virtual void SetMusicInfoVisible(bool visible) {}
