@@ -844,6 +844,10 @@ config WALLPAPER_SHARED_SECRET
     default "YourSharedSecretHere"
     help
         Shared secret used for wallpaper download authentication
-
+config WALLPAPER_SERVER_URL_PREFIX
+    string "Wallpaper Server URL"
+    default "https://wallpaper.example.com"
+    help
+        URL of the wallpaper server
 
 endmenu
