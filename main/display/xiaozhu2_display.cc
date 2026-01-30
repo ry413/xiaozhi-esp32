@@ -22,6 +22,7 @@
 #include "application.h"
 #include <dirent.h>
 #include <system_info.h>
+#include "jpg/jpeg_to_image.h"
 
 #define TAG "Xiaozhu2Display"
 
@@ -29,175 +30,9 @@
 static int current_heights[40] = {0};
 static float avg_power_spectrum[FFT_SIZE/2]={-25.0f};
 
-// static void * fs_open_cb(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode)
-// {
-//     LV_UNUSED(drv);
-
-//     char full_path[256];
-//     snprintf(full_path, sizeof(full_path), "/sdcard/%s", path);
-
-//     const char *fmode = (mode == LV_FS_MODE_WR) ? "wb" :
-//                         (mode == LV_FS_MODE_RD) ? "rb" : "rb+";
-
-//     FILE *f = fopen(full_path, fmode);
-//     if (!f) {
-//         ESP_LOGE(TAG, "Failed to open local file: %s", full_path);
-//     }
-//     return f;
-// }
-
-// static lv_fs_res_t fs_close_cb(lv_fs_drv_t *drv, void *file_p)
-// {
-//     LV_UNUSED(drv);
-//     fclose((FILE *)file_p);
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_read_cb(lv_fs_drv_t *drv, void *file_p,
-//                             void *buf, uint32_t btr, uint32_t *br)
-// {
-//     LV_UNUSED(drv);
-//     size_t r = fread(buf, 1, btr, (FILE *)file_p);
-//     if (br) *br = r;
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_seek_cb(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence)
-// {
-//     LV_UNUSED(drv);
-//     int origin = SEEK_SET;
-//     if (whence == LV_FS_SEEK_CUR) origin = SEEK_CUR;
-//     else if (whence == LV_FS_SEEK_END) origin = SEEK_END;
-
-//     fseek((FILE *)file_p, pos, origin);
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_tell_cb(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p)
-// {
-//     LV_UNUSED(drv);
-//     long p = ftell((FILE *)file_p);
-//     if (p < 0) return LV_FS_RES_UNKNOWN;
-//     *pos_p = (uint32_t)p;
-//     return LV_FS_RES_OK;
-// }
-
-// static void * fs_dir_open_cb(lv_fs_drv_t *drv, const char *path)
-// {
-//     LV_UNUSED(drv);
-
-//     char full_path[256];
-//     snprintf(full_path, sizeof(full_path), "/sdcard/%s", path);
-
-//     DIR *d = opendir(full_path);
-//     return d;
-// }
-
-// static lv_fs_res_t fs_dir_read_cb(lv_fs_drv_t *drv, void *rddir_p, char *fn, uint32_t fn_len)
-// {
-//     LV_UNUSED(drv);
-
-//     DIR *d = (DIR *)rddir_p;
-//     struct dirent *ent = readdir(d);
-
-//     if (!ent) {
-//         fn[0] = '\0';
-//         return LV_FS_RES_OK;
-//     }
-
-//     strncpy(fn, ent->d_name, fn_len);
-//     fn[fn_len - 1] = '\0';
-
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_dir_close_cb(lv_fs_drv_t *drv, void *rddir_p)
-// {
-//     LV_UNUSED(drv);
-//     DIR *d = (DIR *)rddir_p;
-//     if (d) closedir(d);
-//     return LV_FS_RES_OK;
-// }
-
-// void lv_port_sd_fs_init(void)
-// {
-//     static lv_fs_drv_t drv;
-//     lv_fs_drv_init(&drv);
-
-//     drv.letter = 'S';
-//     drv.open_cb = fs_open_cb;
-//     drv.close_cb = fs_close_cb;
-//     drv.read_cb = fs_read_cb;
-//     drv.seek_cb = fs_seek_cb;
-//     drv.tell_cb = fs_tell_cb;
-//     drv.dir_open_cb = fs_dir_open_cb;
-//     drv.dir_close_cb = fs_dir_close_cb;
-//     drv.dir_read_cb = fs_dir_read_cb;
-
-//     lv_fs_drv_register(&drv);
-// }
-
-// static bool has_image_ext(const char *name) {
-//     const char *dot = strrchr(name, '.');
-//     if (!dot) return false;
-
-//     if (!strcasecmp(dot, ".bin")) return true;
-//     if (!strcasecmp(dot, ".png")) return true;
-//     if (!strcasecmp(dot, ".jpg")) return true;
-//     if (!strcasecmp(dot, ".jpeg")) return true;
-//     return false;
-// }
-
-// bool wallpaper_list_scan(wallpaper_list_t *list) {
-//     if (!list) {
-//         printf("1\n");
-//         return false;
-//     }
-//     memset(list, 0, sizeof(*list));
-//     list->last_index = -1;
-
-//     lv_fs_dir_t dir;
-//     lv_fs_res_t res;
-
-//     res = lv_fs_dir_open(&dir, "S:/wallpaper");
-//     if (res != LV_FS_RES_OK) {
-//         printf("2\n");
-//         ESP_LOGE(TAG, "wallpaper: dir open failed (%d)", res);
-//         return false;
-//     }
-
-//     char fn[100];
-
-//     while (1) {
-//         fn[0] = '\0';
-//         res = lv_fs_dir_read(&dir, fn, sizeof(fn));
-//         if (res != LV_FS_RES_OK) break;
-
-//         // 读到空字符串说明结束
-//         if (fn[0] == '\0') break;
-
-//         // LVGL 会返回文件名 / 目录名，自己过滤
-//         if (fn[0] == '.' && (fn[1] == '\0' || (fn[1] == '.' && fn[2] == '\0')))
-//             continue; // 忽略 . 和 ..
-
-//         if (!has_image_ext(fn)) continue;
-
-//         if (list->count >= WALLPAPER_MAX_COUNT) break;
-
-//         // 拼成完整路径: "S:/wallpaper/xxx.png"
-//         snprintf(list->paths[list->count],
-//                  WALLPAPER_MAX_PATH,
-//                  "S:/wallpaper/%s", fn);
-
-//         ESP_LOGI(TAG, "wallpaper: found %s", list->paths[list->count]);
-
-//         list->count++;
-//     }
-
-//     lv_fs_dir_close(&dir);
-//     ESP_LOGI(TAG, "wallpaper: total %u images", (unsigned)list->count);
-//     return list->count > 0;
-// }
+static bool is_jpeg_header(const uint8_t* data, size_t len) {
+    return len >= 2 && data[0] == 0xFF && data[1] == 0xD8;
+}
 
 void Xiaozhu2Display::wallpaper_timer_cb(lv_timer_t *timer) {
     Xiaozhu2Display* board = (Xiaozhu2Display *) lv_timer_get_user_data(timer);
@@ -382,40 +217,6 @@ void Xiaozhu2Display::SetupXiaozhu2UI() {
     lv_obj_set_style_text_align(idle_screen_music_lyrics_label_, LV_TEXT_ALIGN_CENTER, 0); // 设置文本居中对齐
     lv_obj_set_style_text_color(idle_screen_music_lyrics_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_flag(idle_screen_music_lyrics_label_, LV_OBJ_FLAG_HIDDEN, true);
-    
-    // status bar
-    // idle_screen_status_bar_ = lv_obj_create(idle_screen_container_);
-    // lv_obj_set_size(idle_screen_status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
-    // lv_obj_set_style_radius(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_bg_color(idle_screen_status_bar_, lvgl_theme->background_color(), 0);
-    // lv_obj_set_style_text_color(idle_screen_status_bar_, lvgl_theme->text_color(), 0);
-    // lv_obj_set_flex_flow(idle_screen_status_bar_, LV_FLEX_FLOW_ROW);
-    // lv_obj_set_style_pad_all(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_border_width(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_pad_column(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_pad_top(idle_screen_status_bar_, lvgl_theme->spacing(2), 0);
-    // lv_obj_set_style_pad_bottom(idle_screen_status_bar_, lvgl_theme->spacing(2), 0);
-    // lv_obj_set_style_pad_left(idle_screen_status_bar_, lvgl_theme->spacing(4), 0);
-    // lv_obj_set_style_pad_right(idle_screen_status_bar_, lvgl_theme->spacing(4), 0);
-    // lv_obj_set_scrollbar_mode(idle_screen_status_bar_, LV_SCROLLBAR_MODE_OFF);
-    // lv_obj_set_flex_align(idle_screen_status_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
-
-    // idle_screen_network_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_label_set_text(idle_screen_network_label_, "");
-    // lv_obj_set_style_text_font(idle_screen_network_label_, icon_font, 0);
-    // lv_obj_set_style_text_color(idle_screen_network_label_, lvgl_theme->text_color(), 0);
-
-    // idle_screen_status_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_obj_set_flex_grow(idle_screen_status_label_, 1);
-    // lv_label_set_long_mode(idle_screen_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    // lv_obj_set_style_text_align(idle_screen_status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    // lv_obj_set_style_text_color(idle_screen_status_label_, lvgl_theme->text_color(), 0);
-    // lv_label_set_text(idle_screen_status_label_, Lang::Strings::INITIALIZING);
-
-    // idle_screen_mute_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_label_set_text(idle_screen_mute_label_, "");
-    // lv_obj_set_style_text_font(idle_screen_mute_label_, icon_font, 0);
-    // lv_obj_set_style_text_color(idle_screen_mute_label_, lvgl_theme->text_color(), 0);
 }
 
 Xiaozhu2Display::Xiaozhu2Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height,
@@ -533,11 +334,9 @@ void Xiaozhu2Display::UpdateStatusBar(bool update_all) {
         if (codec->output_volume() == 0 && !muted_) {
             muted_ = true;
             lv_label_set_text(mute_label_, FONT_AWESOME_VOLUME_XMARK);
-            // lv_label_set_text(idle_screen_mute_label_, FONT_AWESOME_VOLUME_XMARK);
         } else if (codec->output_volume() > 0 && muted_) {
             muted_ = false;
             lv_label_set_text(mute_label_, "");
-            // lv_label_set_text(idle_screen_mute_label_, "");
         }
     }
 
@@ -647,8 +446,8 @@ void Xiaozhu2Display::SetWallpaper(std::unique_ptr<LvglImage> image) {
     lv_image_set_src(idle_screen_wallpaper_, img_dsc);
 }
 
-void Xiaozhu2Display::AddWallpaperToCollection(const std::string& url) {
-    wallpaper_urls.push_back(url);
+void Xiaozhu2Display::AddWallpaperToCollection(const std::string& key) {
+    wallpaper_keys.push_back(key);
 }
 
 void Xiaozhu2Display::SetMusicInfoVisible(bool visible) {
@@ -776,7 +575,7 @@ bool Xiaozhu2Display::GetWallpapers() {
     // ESP_LOGI(TAG, "Wallpapers response: %s", resp.c_str());
 
     // 3. 解析 JSON
-    // { "data": [ { "id": 1, "url": "http://..." }, ... ] }
+    // { "data": [ { "id": 1, "fileKey": "http://..." }, ... ] }
     cJSON* root = cJSON_Parse(resp.c_str());
     if (root == nullptr) {
         ESP_LOGE(TAG, "Failed to parse JSON response");
@@ -794,16 +593,16 @@ bool Xiaozhu2Display::GetWallpapers() {
     auto display = board.GetDisplay();
     cJSON_ArrayForEach(item, dataNode) {
         cJSON* idNode = cJSON_GetObjectItem(item, "id");
-        cJSON* urlNode = cJSON_GetObjectItem(item, "url");
-        if (!cJSON_IsNumber(idNode) || !cJSON_IsString(urlNode)) {
+        cJSON* fileKeyNode = cJSON_GetObjectItem(item, "fileKey");
+        if (!cJSON_IsNumber(idNode) || !cJSON_IsString(fileKeyNode)) {
             continue;
         }
 
         int id = idNode->valueint;
-        const char* wurl = urlNode->valuestring;
+        const char* wfileKey = fileKeyNode->valuestring;
 
-        ESP_LOGI(TAG, "Wallpaper: id=%d url=%s", id, wurl);
-        display->AddWallpaperToCollection(std::string(wurl));
+        ESP_LOGI(TAG, "Wallpaper: id=%d fileKey=%s", id, wfileKey);
+        display->AddWallpaperToCollection(std::string(wfileKey));
     }
 
     cJSON_Delete(root);
@@ -812,13 +611,6 @@ bool Xiaozhu2Display::GetWallpapers() {
 
 void Xiaozhu2Display::SetIdleScreenVisible(bool visible) {
     DisplayLockGuard lock(this);
-    // if (visible) {
-    //     lv_obj_set_parent(status_bar_, idle_screen_container_);
-    //     lv_obj_move_to_index(status_bar_, 1);
-    // } else {
-    //     lv_obj_set_parent(status_bar_, container_);
-    //     lv_obj_move_background(status_bar_);
-    // }
     lv_obj_set_flag(idle_screen_container_, LV_OBJ_FLAG_HIDDEN, !visible);
 }
 
@@ -1192,10 +984,10 @@ void Xiaozhu2Display::StopFft() {
 }
 
 bool Xiaozhu2Display::random_change_wallpaper() {
-    if (!idle_screen_wallpaper_ || wallpaper_urls.empty()) return false;
-    auto current_url = current_wallpaper_url_;
+    if (!idle_screen_wallpaper_ || wallpaper_keys.empty()) return false;
+    auto current_key = current_wallpaper_key_;
 
-    ssize_t count = wallpaper_urls.size();
+    ssize_t count = wallpaper_keys.size();
     if (count == 1) {
         return false;
     }
@@ -1203,16 +995,17 @@ bool Xiaozhu2Display::random_change_wallpaper() {
     ssize_t idx;
     do {
         idx = esp_random() % count;
-    } while (wallpaper_urls[idx] == current_url);
+    } while (wallpaper_keys[idx] == current_key);
 
 
     // 当场请求壁纸
-    auto& url = wallpaper_urls[idx];
-    current_wallpaper_url_ = url;
+    auto& key = wallpaper_keys[idx];
+    current_wallpaper_key_ = key;
     auto http = Board::GetInstance().GetNetwork()->CreateHttp(4);
+    std::string wallpaper_url = std::string(CONFIG_WALLPAPER_SERVER_URL_PREFIX) + "/" + key;
 
-    if (!http->Open("GET", url)) {
-        ESP_LOGE(TAG, "Failed to open URL: %s", url.c_str());
+    if (!http->Open("GET", wallpaper_url)) {
+        ESP_LOGE(TAG, "Failed to open URL: %s", wallpaper_url.c_str());
         return false;
     }
     int status_code = http->GetStatusCode();
@@ -1223,7 +1016,9 @@ bool Xiaozhu2Display::random_change_wallpaper() {
     size_t content_length = http->GetBodyLength();
     char* data = (char*)heap_caps_malloc(content_length, MALLOC_CAP_8BIT);
     if (data == nullptr) {
-        ESP_LOGE(TAG, "Failed to allocate memory for image: %s", url.c_str());
+        ESP_LOGE(TAG, "Failed to allocate memory for image: %s", wallpaper_url.c_str());
+        http->Close();
+        return false;
     }
 
     size_t total_read = 0;
@@ -1231,7 +1026,9 @@ bool Xiaozhu2Display::random_change_wallpaper() {
         int ret = http->Read(data + total_read, content_length - total_read);
         if (ret < 0) {
             heap_caps_free(data);
-            ESP_LOGE(TAG, "Failed to download image: %s", url.c_str());
+            ESP_LOGE(TAG, "Failed to download image: %s", wallpaper_url.c_str());
+            http->Close();
+            return false;
         }
         if (ret == 0) {
             break;
@@ -1240,7 +1037,25 @@ bool Xiaozhu2Display::random_change_wallpaper() {
     }
 
     http->Close();
-    auto image = std::make_unique<LvglAllocatedImage>(data, content_length);
+    std::unique_ptr<LvglAllocatedImage> image;
+    if (is_jpeg_header(reinterpret_cast<const uint8_t*>(data), content_length)) {
+        uint8_t* decoded = nullptr;
+        size_t decoded_len = 0;
+        size_t decoded_w = 0;
+        size_t decoded_h = 0;
+        size_t decoded_stride = 0;
+        esp_err_t ret = jpeg_to_image(reinterpret_cast<const uint8_t*>(data), content_length, &decoded, &decoded_len,
+                                      &decoded_w, &decoded_h, &decoded_stride);
+        heap_caps_free(data);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to decode JPEG wallpaper: %s", wallpaper_url.c_str());
+            return false;
+        }
+        image = std::make_unique<LvglAllocatedImage>(decoded, decoded_len, decoded_w, decoded_h, decoded_stride,
+                                                     LV_COLOR_FORMAT_RGB565);
+    } else {
+        image = std::make_unique<LvglAllocatedImage>(data, content_length);
+    }
 
     preview_image_cached_ = std::move(image);
     auto img_dsc = preview_image_cached_->image_dsc();

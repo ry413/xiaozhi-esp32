@@ -40,8 +40,8 @@ protected:
     lv_obj_t* idle_screen_music_lyrics_label_ = nullptr;
     
     std::unique_ptr<LvglImage> preview_wallpaper_cached_ = nullptr;
-    std::vector<std::string> wallpaper_urls;
-    std::string current_wallpaper_url_;
+    std::vector<std::string> wallpaper_keys;
+    std::string current_wallpaper_key_;
     
     void SetupXiaozhu2UI();
 
