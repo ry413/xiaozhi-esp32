@@ -819,13 +819,17 @@ void Application::HandleStateChangedEvent() {
     
     switch (new_state) {
         case kDeviceStateUnknown:
-        case kDeviceStateIdle:
+        case kDeviceStateIdle: {
             display->SetStatus(Lang::Strings::STANDBY);
             display->SetEmotion("neutral");
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            board.GetMusic()->Resume();
+            auto music = board.GetMusic();
+            if (music) {
+                music->Pause();
+            }
             break;
+        }
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
