@@ -311,6 +311,27 @@ void McpServer::AddUserOnlyTools() {
                 return true;
             });
     }
+    AddUserOnlyTool("self.device_params.preview", "Preview the device parameters",
+        PropertyList({
+            Property("params_json", kPropertyTypeString),
+        }),
+        [this](const PropertyList& properties) -> ReturnValue {
+            auto params_json = properties["params_json"].value<std::string>();
+            Board::GetInstance().GetDisplay()->PreviewDeviceParams(params_json);
+            
+            return true;
+        });
+
+    AddUserOnlyTool("self.device_params.set", "Set the device parameters",
+        PropertyList({
+            Property("params_json", kPropertyTypeString),
+        }),
+        [this](const PropertyList& properties) -> ReturnValue {
+            auto params_json = properties["params_json"].value<std::string>();
+            Board::GetInstance().SetDeviceParams(params_json);
+            
+            return true;
+        });
 }
 
 void McpServer::AddTool(McpTool* tool) {
