@@ -33,6 +33,7 @@ void Display::ShowNotification(const char* notification, int duration_ms) {
 }
 
 void Display::UpdateStatusBar(bool update_all) {
+    ESP_LOGW(TAG, "UpdateStatusBar: %d", update_all);
 }
 
 
@@ -57,7 +58,9 @@ void Display::SetPowerSaveMode(bool on) {
 
 bool Display::GetWallpapers() { return false; }
 
-void Display::SetIdleScreenVisible(bool visible) { ESP_LOGW(TAG, "SetIdleScreenVisible: %d", visible); }
+void Display::SetIdleScreenVisible(bool visible) {
+    ESP_LOGW(TAG, "SetIdleScreenVisible: %d", visible);
+}
 
 void Display::SetWallpaper(const char* path) {
     ESP_LOGW(TAG, "SetWallpaper called");
