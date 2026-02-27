@@ -35,10 +35,14 @@ public:
     virtual void ShowNotification(const std::string &notification, int duration_ms = 3000);
     virtual void SetEmotion(const char* emotion);
     virtual void SetChatMessage(const char* role, const char* content);
+    virtual void ClearChatMessages();
     virtual void SetTheme(Theme* theme);
     virtual Theme* GetTheme() { return current_theme_; }
     virtual void UpdateStatusBar(bool update_all = false);
     virtual void SetPowerSaveMode(bool on);
+    virtual void SetupUI() { 
+        setup_ui_called_ = true;
+    }
 
     virtual void SetIdleScreenVisible(bool visible);
     virtual void SetWallpaper(const char* path);
@@ -56,10 +60,12 @@ public:
 
     inline int width() const { return width_; }
     inline int height() const { return height_; }
+    inline bool IsSetupUICalled() const { return setup_ui_called_; }
 
 protected:
     int width_ = 0;
     int height_ = 0;
+    bool setup_ui_called_ = false;  // Track if SetupUI() has been called
 
     Theme* current_theme_ = nullptr;
 

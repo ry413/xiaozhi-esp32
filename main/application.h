@@ -156,6 +156,8 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    void ContinueOpenAudioChannel(ListeningMode mode);
+    void ContinueWakeWordInvoke(const std::string& wake_word);
 
     // Activation task (runs in background)
     void ActivationTask();
@@ -166,6 +168,7 @@ private:
     void InitializeProtocol();
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
+    ListeningMode GetDefaultListeningMode() const;
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
