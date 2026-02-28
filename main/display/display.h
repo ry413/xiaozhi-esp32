@@ -63,6 +63,7 @@ public:
     inline int height() const { return height_; }
     inline bool IsSetupUICalled() const { return setup_ui_called_; }
 
+    virtual void PreviewDeviceParams(const std::string& params_json) {}
 protected:
     int width_ = 0;
     int height_ = 0;
