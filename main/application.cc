@@ -880,15 +880,18 @@ void Application::HandleStateChangedEvent() {
     
     switch (new_state) {
         case kDeviceStateUnknown:
-        case kDeviceStateIdle:
+        case kDeviceStateIdle: {
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
-            display->SetIdleScreenVisible(true);
-            board.GetMusic()->Resume();
+            auto music = board.GetMusic();
+            if (music) {
+                music->Pause();
+            }
             break;
+        }
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
             display->SetEmotion("neutral");
