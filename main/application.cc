@@ -19,6 +19,7 @@
 
 #define TAG "Application"
 
+static constexpr int64_t kChatKeepAliveTimeoutUs = 50LL * 1000 * 1000;
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -44,12 +45,28 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    esp_timer_create_args_t chat_keepalive_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_CHAT_KEEPALIVE_TIMEOUT);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "chat_keepalive_timer",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&chat_keepalive_timer_args, &chat_keepalive_timer_handle_);
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (chat_keepalive_timer_handle_ != nullptr) {
+        esp_timer_stop(chat_keepalive_timer_handle_);
+        esp_timer_delete(chat_keepalive_timer_handle_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -179,7 +196,8 @@ void Application::Run() {
         MAIN_EVENT_START_LISTENING |
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED;
+        MAIN_EVENT_STATE_CHANGED |
+        MAIN_EVENT_CHAT_KEEPALIVE_TIMEOUT;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -203,6 +221,10 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_STATE_CHANGED) {
             HandleStateChangedEvent();
+        }
+
+        if (bits & MAIN_EVENT_CHAT_KEEPALIVE_TIMEOUT) {
+            HandleChatKeepAliveTimeoutEvent();
         }
 
         if (bits & MAIN_EVENT_TOGGLE_CHAT) {
@@ -318,6 +340,9 @@ void Application::HandleActivationDoneEvent() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+
+    // Auto enter chat mode after boot.
+    ToggleChatState();
 }
 
 void Application::ActivationTask() {
@@ -507,11 +532,26 @@ void Application::InitializeProtocol() {
             ESP_LOGW(TAG, "Server sample rate %d does not match device output sample rate %d, resampling may cause distortion",
                 protocol_->server_sample_rate(), codec->output_sample_rate());
         }
+        ResetChatKeepAliveTimer();
     });
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
         Schedule([this]() {
+            StopChatKeepAliveTimer();
+            if (pending_keepalive_reconnect_) {
+                pending_keepalive_reconnect_ = false;
+                // Return to idle first, then reuse the normal toggle flow to reopen channel.
+                // This ensures idle side-effects (voice processing reset, UI reset, etc.) are applied.
+                SetDeviceState(kDeviceStateIdle);
+                ToggleChatState();
+                return;
+            }
+            if (auto_reconnect_enabled_) {
+                SetDeviceState(kDeviceStateIdle);
+                ToggleChatState();
+                return;
+            }
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -519,6 +559,7 @@ void Application::InitializeProtocol() {
     });
     
     protocol_->OnIncomingJson([this, display](const cJSON* root) {
+        ResetChatKeepAliveTimer();
         // Parse JSON data
         auto type = cJSON_GetObjectItem(root, "type");
         if (strcmp(type->valuestring, "tts") == 0) {
@@ -693,6 +734,7 @@ void Application::HandleToggleChatEvent() {
     }
 
     if (state == kDeviceStateIdle) {
+        auto_reconnect_enabled_ = true;
         ListeningMode mode = GetDefaultListeningMode();
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
@@ -704,8 +746,10 @@ void Application::HandleToggleChatEvent() {
         }
         SetListeningMode(mode);
     } else if (state == kDeviceStateSpeaking) {
+        auto_reconnect_enabled_ = false;
         AbortSpeaking(kAbortReasonNone);
     } else if (state == kDeviceStateListening) {
+        auto_reconnect_enabled_ = false;
         protocol_->CloseAudioChannel();
     }
 }
@@ -743,6 +787,7 @@ void Application::HandleStartListeningEvent() {
     }
     
     if (state == kDeviceStateIdle) {
+        auto_reconnect_enabled_ = true;
         if (!protocol_->IsAudioChannelOpened()) {
             SetDeviceState(kDeviceStateConnecting);
             // Schedule to let the state change be processed first (UI update)
@@ -766,6 +811,7 @@ void Application::HandleStopListeningEvent() {
         SetDeviceState(kDeviceStateWifiConfiguring);
         return;
     } else if (state == kDeviceStateListening) {
+        auto_reconnect_enabled_ = false;
         if (protocol_) {
             protocol_->SendStopListening();
         }
@@ -783,6 +829,7 @@ void Application::HandleWakeWordDetectedEvent() {
     ESP_LOGI(TAG, "Wake word detected: %s (state: %d)", wake_word.c_str(), (int)state);
 
     if (state == kDeviceStateIdle) {
+        auto_reconnect_enabled_ = true;
         audio_service_.EncodeWakeWord();
         auto wake_word = audio_service_.GetLastWakeWord();
 
@@ -951,8 +998,39 @@ ListeningMode Application::GetDefaultListeningMode() const {
     return aec_mode_ == kAecOff ? kListeningModeAutoStop : kListeningModeRealtime;
 }
 
+void Application::ResetChatKeepAliveTimer() {
+    if (chat_keepalive_timer_handle_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(chat_keepalive_timer_handle_);
+    esp_timer_start_once(chat_keepalive_timer_handle_, kChatKeepAliveTimeoutUs);
+}
+
+void Application::StopChatKeepAliveTimer() {
+    if (chat_keepalive_timer_handle_ == nullptr) {
+        return;
+    }
+    esp_timer_stop(chat_keepalive_timer_handle_);
+}
+
+void Application::HandleChatKeepAliveTimeoutEvent() {
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return;
+    }
+
+    if (GetDeviceState() != kDeviceStateListening) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Chat keepalive timeout, restarting audio channel");
+    pending_keepalive_reconnect_ = true;
+    // Keepalive reconnect is local-initiated; do not send goodbye to server.
+    protocol_->CloseAudioChannel(false);
+}
+
 void Application::Reboot() {
     ESP_LOGI(TAG, "Rebooting...");
+    auto_reconnect_enabled_ = false;
     // Disconnect the audio channel
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         protocol_->CloseAudioChannel();
@@ -974,6 +1052,7 @@ bool Application::UpgradeFirmware(const std::string& url, const std::string& ver
     // Close audio channel if it's open
     if (protocol_ && protocol_->IsAudioChannelOpened()) {
         ESP_LOGI(TAG, "Closing audio channel before firmware upgrade");
+        auto_reconnect_enabled_ = false;
         protocol_->CloseAudioChannel();
     }
     ESP_LOGI(TAG, "Starting firmware upgrade from URL: %s", upgrade_url.c_str());
@@ -1024,6 +1103,7 @@ void Application::WakeWordInvoke(const std::string& wake_word) {
     auto state = GetDeviceState();
     
     if (state == kDeviceStateIdle) {
+        auto_reconnect_enabled_ = true;
         audio_service_.EncodeWakeWord();
 
         if (!protocol_->IsAudioChannelOpened()) {
@@ -1097,6 +1177,7 @@ void Application::SetAecMode(AecMode mode) {
 
         // If the AEC mode is changed, close the audio channel
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            auto_reconnect_enabled_ = false;
             protocol_->CloseAudioChannel();
         }
     });
@@ -1110,10 +1191,10 @@ void Application::ResetProtocol() {
     Schedule([this]() {
         // Close audio channel if opened
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            auto_reconnect_enabled_ = false;
             protocol_->CloseAudioChannel();
         }
         // Reset protocol
         protocol_.reset();
     });
 }
-
