@@ -33,15 +33,24 @@ protected:
     lv_obj_t* idle_screen_wallpaper_ = nullptr;
     lv_obj_t* idle_screen_status_bar_ = nullptr;
     lv_obj_t* idle_screen_status_label_ = nullptr;
+    lv_obj_t* idle_screen_weather_label_ = nullptr;
     lv_obj_t* idle_screen_mute_label_ = nullptr;
     lv_obj_t* idle_screen_network_label_ = nullptr;
     lv_obj_t* idle_screen_content_ = nullptr;
     lv_obj_t* idle_screen_music_info_label_ = nullptr;
     lv_obj_t* idle_screen_music_lyrics_label_ = nullptr;
+    std::string weather_position_ = "hidden";
+    int weather_offset_x_ = 0;
+    int weather_offset_y_ = 0;
+    int weather_spacing_ = 0;
+    bool weather_layout_initialized_ = false;
     
     std::unique_ptr<LvglImage> preview_wallpaper_cached_ = nullptr;
-    std::vector<std::string> wallpaper_urls;
-    std::string current_wallpaper_url_;
+    std::vector<std::string> wallpaper_keys;
+    std::string current_wallpaper_key_;
+    lv_timer_t* wallpaper_timer_ = nullptr;
+    uint32_t wallpaper_switch_interval_ms_ = 3600 * 1000;
+    std::string wallpaper_switch_mode_ = "random";
     
     void SetupXiaozhu2UI();
 
@@ -76,6 +85,7 @@ protected:
     static void periodicUpdateTaskWrapper(void* arg);
     void drawSpectrumIfReady();
     void readAudioData();
+    void ApplyWeatherLabelLayout();
 
 public:
     Xiaozhu2Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel,
@@ -83,6 +93,8 @@ public:
                   bool mirror_x, bool mirror_y, bool swap_xy);
     virtual void SetEmotion(const char* emotion) override {};
     virtual void UpdateStatusBar(bool update_all = false) override;
+    virtual void SetTheme(Theme* theme) override;
+    virtual void SetupUI() override;
 
     virtual bool GetWallpapers() override;
     virtual void SetIdleScreenVisible(bool visible) override;
@@ -90,6 +102,8 @@ public:
     virtual void SetWallpaper(std::unique_ptr<LvglImage> image) override;
     virtual void AddWallpaperToCollection(const std::string& url) override;
     virtual bool RandomChangeWallpaper() override;
+    virtual void SetWallpaperSwitchConfig(uint32_t interval_ms, const std::string& mode) override;
+    virtual void SetWeatherInfo(const char* info) override;
 
     virtual void SetMusicInfoVisible(bool visible) override;
     virtual void SetMusicInfo(const char* text) override;
@@ -98,8 +112,7 @@ public:
     virtual void StartFft() override;
     virtual void ClearScreen() override;
     virtual void StopFft() override;
-    
-    virtual void SetTheme(Theme* theme) override;
+    virtual void PreviewDeviceParams(const std::string& params_json) override;
 };
 
 #endif // XIAOZHU2_DISPLAY_H

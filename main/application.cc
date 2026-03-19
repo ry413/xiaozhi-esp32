@@ -263,6 +263,11 @@ void Application::Run() {
             if (clock_ticks_ % 10 == 0) {
                 SystemInfo::PrintHeapStats();
             }
+
+            // 每4小时更新一次天气
+            if (clock_ticks_ % 14400 == 0) {
+                protocol_->GetWeather(Board::GetInstance().GetWeatherRegion());
+            }
         }
     }
 }
@@ -283,7 +288,7 @@ void Application::HandleNetworkConnectedEvent() {
             Application* app = static_cast<Application*>(arg);
             app->ActivationTask();
             app->activation_task_handle_ = nullptr;
-
+            app->protocol_->GetWeather(Board::GetInstance().GetWeatherRegion());
             auto display = Board::GetInstance().GetDisplay();
             display->GetWallpapers();
             display->RandomChangeWallpaper();
@@ -617,7 +622,32 @@ void Application::InitializeProtocol() {
                 ESP_LOGW(TAG, "Invalid custom message format: missing payload");
             }
 #endif
-        } else {
+        } else if (strcmp(type->valuestring, "get_weather") == 0) {
+            auto data = cJSON_GetObjectItem(root, "data");
+            if (cJSON_IsObject(data)) {
+                auto error = cJSON_GetObjectItem(data, "error");
+                if (error && cJSON_IsString(error)) {
+                    ESP_LOGW(TAG, "Failed to get weather: %s", error->valuestring);
+                    Schedule([this, display, error]() {
+                        display->SetWeatherInfo(error->valuestring);
+                    });
+                } else {
+                    auto temp = cJSON_GetObjectItem(data, "temp");
+                    auto text = cJSON_GetObjectItem(data, "text");
+                    if (cJSON_IsString(temp) && cJSON_IsString(text)) {
+                        auto weather_info = Board::GetInstance().GetWeatherRegion() + " " + std::string(temp->valuestring) + "°C/" + std::string(text->valuestring);
+                        Schedule([this, display, weather_info]() {
+                            display->SetWeatherInfo(weather_info.c_str());
+                        });
+                    } else {
+                        ESP_LOGW(TAG, "Invalid weather data format");
+                    }
+                }
+            } else {
+                ESP_LOGW(TAG, "Invalid get_weather message format: missing data");
+            }
+        }
+         else {
             ESP_LOGW(TAG, "Unknown message type: %s", type->valuestring);
         }
     });
@@ -884,6 +914,7 @@ void Application::HandleStateChangedEvent() {
             display->SetStatus(Lang::Strings::STANDBY);
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
+            display->SetIdleScreenVisible(true);
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
             display->SetIdleScreenVisible(true);
@@ -1096,7 +1127,18 @@ void Application::SendMcpMessage(const std::string& payload) {
 }
 
 void Application::SendDirectMessageToChat(const std::string& message) {
+    if (protocol_ == nullptr) return;
+    
     Schedule([this, message = std::move(message)]() {
+        ListeningMode mode = GetDefaultListeningMode();
+        if (!protocol_->IsAudioChannelOpened()) {
+            SetDeviceState(kDeviceStateConnecting);
+            Schedule([this, mode]() {
+                ContinueOpenAudioChannel(mode);
+            });
+            return;
+        }
+        
         if (protocol_ && protocol_->IsAudioChannelOpened()) {
             protocol_->SendDirectMessageToChat(message);
         }

@@ -332,6 +332,12 @@ void McpServer::AddUserOnlyTools() {
             
             return true;
         });
+    
+    AddUserOnlyTool("self.device_params.get", "Get the device parameters",
+        PropertyList(),
+        [this](const PropertyList& properties) -> ReturnValue {
+            return Board::GetInstance().GetDeviceParams();
+        });
 }
 
 void McpServer::AddTool(McpTool* tool) {

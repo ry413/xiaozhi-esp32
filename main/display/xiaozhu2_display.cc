@@ -13,6 +13,8 @@
 #include <esp_lvgl_port.h>
 #include <esp_psram.h>
 #include <cstring>
+#include <cctype>
+#include <src/misc/cache/lv_cache.h>
 #include <cmath>
 #include <math.h>
 
@@ -29,176 +31,6 @@
 static int current_heights[40] = {0};
 static float avg_power_spectrum[FFT_SIZE/2]={-25.0f};
 
-// static void * fs_open_cb(lv_fs_drv_t *drv, const char *path, lv_fs_mode_t mode)
-// {
-//     LV_UNUSED(drv);
-
-//     char full_path[256];
-//     snprintf(full_path, sizeof(full_path), "/sdcard/%s", path);
-
-//     const char *fmode = (mode == LV_FS_MODE_WR) ? "wb" :
-//                         (mode == LV_FS_MODE_RD) ? "rb" : "rb+";
-
-//     FILE *f = fopen(full_path, fmode);
-//     if (!f) {
-//         ESP_LOGE(TAG, "Failed to open local file: %s", full_path);
-//     }
-//     return f;
-// }
-
-// static lv_fs_res_t fs_close_cb(lv_fs_drv_t *drv, void *file_p)
-// {
-//     LV_UNUSED(drv);
-//     fclose((FILE *)file_p);
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_read_cb(lv_fs_drv_t *drv, void *file_p,
-//                             void *buf, uint32_t btr, uint32_t *br)
-// {
-//     LV_UNUSED(drv);
-//     size_t r = fread(buf, 1, btr, (FILE *)file_p);
-//     if (br) *br = r;
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_seek_cb(lv_fs_drv_t *drv, void *file_p, uint32_t pos, lv_fs_whence_t whence)
-// {
-//     LV_UNUSED(drv);
-//     int origin = SEEK_SET;
-//     if (whence == LV_FS_SEEK_CUR) origin = SEEK_CUR;
-//     else if (whence == LV_FS_SEEK_END) origin = SEEK_END;
-
-//     fseek((FILE *)file_p, pos, origin);
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_tell_cb(lv_fs_drv_t *drv, void *file_p, uint32_t *pos_p)
-// {
-//     LV_UNUSED(drv);
-//     long p = ftell((FILE *)file_p);
-//     if (p < 0) return LV_FS_RES_UNKNOWN;
-//     *pos_p = (uint32_t)p;
-//     return LV_FS_RES_OK;
-// }
-
-// static void * fs_dir_open_cb(lv_fs_drv_t *drv, const char *path)
-// {
-//     LV_UNUSED(drv);
-
-//     char full_path[256];
-//     snprintf(full_path, sizeof(full_path), "/sdcard/%s", path);
-
-//     DIR *d = opendir(full_path);
-//     return d;
-// }
-
-// static lv_fs_res_t fs_dir_read_cb(lv_fs_drv_t *drv, void *rddir_p, char *fn, uint32_t fn_len)
-// {
-//     LV_UNUSED(drv);
-
-//     DIR *d = (DIR *)rddir_p;
-//     struct dirent *ent = readdir(d);
-
-//     if (!ent) {
-//         fn[0] = '\0';
-//         return LV_FS_RES_OK;
-//     }
-
-//     strncpy(fn, ent->d_name, fn_len);
-//     fn[fn_len - 1] = '\0';
-
-//     return LV_FS_RES_OK;
-// }
-
-// static lv_fs_res_t fs_dir_close_cb(lv_fs_drv_t *drv, void *rddir_p)
-// {
-//     LV_UNUSED(drv);
-//     DIR *d = (DIR *)rddir_p;
-//     if (d) closedir(d);
-//     return LV_FS_RES_OK;
-// }
-
-// void lv_port_sd_fs_init(void)
-// {
-//     static lv_fs_drv_t drv;
-//     lv_fs_drv_init(&drv);
-
-//     drv.letter = 'S';
-//     drv.open_cb = fs_open_cb;
-//     drv.close_cb = fs_close_cb;
-//     drv.read_cb = fs_read_cb;
-//     drv.seek_cb = fs_seek_cb;
-//     drv.tell_cb = fs_tell_cb;
-//     drv.dir_open_cb = fs_dir_open_cb;
-//     drv.dir_close_cb = fs_dir_close_cb;
-//     drv.dir_read_cb = fs_dir_read_cb;
-
-//     lv_fs_drv_register(&drv);
-// }
-
-// static bool has_image_ext(const char *name) {
-//     const char *dot = strrchr(name, '.');
-//     if (!dot) return false;
-
-//     if (!strcasecmp(dot, ".bin")) return true;
-//     if (!strcasecmp(dot, ".png")) return true;
-//     if (!strcasecmp(dot, ".jpg")) return true;
-//     if (!strcasecmp(dot, ".jpeg")) return true;
-//     return false;
-// }
-
-// bool wallpaper_list_scan(wallpaper_list_t *list) {
-//     if (!list) {
-//         printf("1\n");
-//         return false;
-//     }
-//     memset(list, 0, sizeof(*list));
-//     list->last_index = -1;
-
-//     lv_fs_dir_t dir;
-//     lv_fs_res_t res;
-
-//     res = lv_fs_dir_open(&dir, "S:/wallpaper");
-//     if (res != LV_FS_RES_OK) {
-//         printf("2\n");
-//         ESP_LOGE(TAG, "wallpaper: dir open failed (%d)", res);
-//         return false;
-//     }
-
-//     char fn[100];
-
-//     while (1) {
-//         fn[0] = '\0';
-//         res = lv_fs_dir_read(&dir, fn, sizeof(fn));
-//         if (res != LV_FS_RES_OK) break;
-
-//         // 读到空字符串说明结束
-//         if (fn[0] == '\0') break;
-
-//         // LVGL 会返回文件名 / 目录名，自己过滤
-//         if (fn[0] == '.' && (fn[1] == '\0' || (fn[1] == '.' && fn[2] == '\0')))
-//             continue; // 忽略 . 和 ..
-
-//         if (!has_image_ext(fn)) continue;
-
-//         if (list->count >= WALLPAPER_MAX_COUNT) break;
-
-//         // 拼成完整路径: "S:/wallpaper/xxx.png"
-//         snprintf(list->paths[list->count],
-//                  WALLPAPER_MAX_PATH,
-//                  "S:/wallpaper/%s", fn);
-
-//         ESP_LOGI(TAG, "wallpaper: found %s", list->paths[list->count]);
-
-//         list->count++;
-//     }
-
-//     lv_fs_dir_close(&dir);
-//     ESP_LOGI(TAG, "wallpaper: total %u images", (unsigned)list->count);
-//     return list->count > 0;
-// }
-
 void Xiaozhu2Display::wallpaper_timer_cb(lv_timer_t *timer) {
     Xiaozhu2Display* board = (Xiaozhu2Display *) lv_timer_get_user_data(timer);
     if (!board) return;
@@ -206,7 +38,15 @@ void Xiaozhu2Display::wallpaper_timer_cb(lv_timer_t *timer) {
 }
 
 void Xiaozhu2Display::wallpaper_start_auto_change(uint32_t interval_ms) {
-    lv_timer_create(wallpaper_timer_cb, interval_ms, this);
+    if (interval_ms == 0) {
+        interval_ms = 1000 * 60 * 60;
+    }
+    wallpaper_switch_interval_ms_ = interval_ms;
+    if (wallpaper_timer_ == nullptr) {
+        wallpaper_timer_ = lv_timer_create(wallpaper_timer_cb, interval_ms, this);
+    } else {
+        lv_timer_set_period(wallpaper_timer_, interval_ms);
+    }
 }
 
 void Xiaozhu2Display::SetupXiaozhu2UI() {
@@ -352,6 +192,13 @@ void Xiaozhu2Display::SetupXiaozhu2UI() {
     lv_label_set_text(idle_screen_status_label_, Lang::Strings::INITIALIZING);
     lv_obj_set_flag(idle_screen_status_label_, LV_OBJ_FLAG_HIDDEN, true);
 
+    idle_screen_weather_label_ = lv_label_create(idle_screen_container_);
+    lv_obj_set_size(idle_screen_weather_label_, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_text_align(idle_screen_weather_label_, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_color(idle_screen_weather_label_, lvgl_theme->text_color(), 0);
+    lv_label_set_text(idle_screen_weather_label_, "");
+    lv_obj_set_flag(idle_screen_weather_label_, LV_OBJ_FLAG_HIDDEN, true);
+
     idle_screen_content_ = lv_obj_create(idle_screen_container_);
     lv_obj_set_pos(idle_screen_content_, 0, LV_PCT(60));
     lv_obj_set_size(idle_screen_content_, LV_PCT(100), LV_PCT(40));
@@ -382,40 +229,24 @@ void Xiaozhu2Display::SetupXiaozhu2UI() {
     lv_obj_set_style_text_align(idle_screen_music_lyrics_label_, LV_TEXT_ALIGN_CENTER, 0); // 设置文本居中对齐
     lv_obj_set_style_text_color(idle_screen_music_lyrics_label_, lvgl_theme->text_color(), 0);
     lv_obj_set_flag(idle_screen_music_lyrics_label_, LV_OBJ_FLAG_HIDDEN, true);
+}
+
+void Xiaozhu2Display::SetupUI() {
+    // Prevent duplicate calls - if already called, return early
+    if (setup_ui_called_) {
+        ESP_LOGW(TAG, "SetupUI() called multiple times, skipping duplicate call");
+        return;
+    }
     
-    // status bar
-    // idle_screen_status_bar_ = lv_obj_create(idle_screen_container_);
-    // lv_obj_set_size(idle_screen_status_bar_, LV_HOR_RES, LV_SIZE_CONTENT);
-    // lv_obj_set_style_radius(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_bg_color(idle_screen_status_bar_, lvgl_theme->background_color(), 0);
-    // lv_obj_set_style_text_color(idle_screen_status_bar_, lvgl_theme->text_color(), 0);
-    // lv_obj_set_flex_flow(idle_screen_status_bar_, LV_FLEX_FLOW_ROW);
-    // lv_obj_set_style_pad_all(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_border_width(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_pad_column(idle_screen_status_bar_, 0, 0);
-    // lv_obj_set_style_pad_top(idle_screen_status_bar_, lvgl_theme->spacing(2), 0);
-    // lv_obj_set_style_pad_bottom(idle_screen_status_bar_, lvgl_theme->spacing(2), 0);
-    // lv_obj_set_style_pad_left(idle_screen_status_bar_, lvgl_theme->spacing(4), 0);
-    // lv_obj_set_style_pad_right(idle_screen_status_bar_, lvgl_theme->spacing(4), 0);
-    // lv_obj_set_scrollbar_mode(idle_screen_status_bar_, LV_SCROLLBAR_MODE_OFF);
-    // lv_obj_set_flex_align(idle_screen_status_bar_, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    Display::SetupUI();  // Mark SetupUI as called
+    SetupXiaozhu2UI();
 
-    // idle_screen_network_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_label_set_text(idle_screen_network_label_, "");
-    // lv_obj_set_style_text_font(idle_screen_network_label_, icon_font, 0);
-    // lv_obj_set_style_text_color(idle_screen_network_label_, lvgl_theme->text_color(), 0);
-
-    // idle_screen_status_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_obj_set_flex_grow(idle_screen_status_label_, 1);
-    // lv_label_set_long_mode(idle_screen_status_label_, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    // lv_obj_set_style_text_align(idle_screen_status_label_, LV_TEXT_ALIGN_CENTER, 0);
-    // lv_obj_set_style_text_color(idle_screen_status_label_, lvgl_theme->text_color(), 0);
-    // lv_label_set_text(idle_screen_status_label_, Lang::Strings::INITIALIZING);
-
-    // idle_screen_mute_label_ = lv_label_create(idle_screen_status_bar_);
-    // lv_label_set_text(idle_screen_mute_label_, "");
-    // lv_obj_set_style_text_font(idle_screen_mute_label_, icon_font, 0);
-    // lv_obj_set_style_text_color(idle_screen_mute_label_, lvgl_theme->text_color(), 0);
+    // Apply persisted device params after LVGL objects are created.
+    Settings settings("device_params");
+    auto params_json = settings.GetString("device_params", "{}");
+    if (!params_json.empty() && params_json != "{}") {
+        PreviewDeviceParams(params_json);
+    }
 }
 
 Xiaozhu2Display::Xiaozhu2Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_panel_handle_t panel, int width, int height,
@@ -511,8 +342,6 @@ Xiaozhu2Display::Xiaozhu2Display(esp_lcd_panel_io_handle_t panel_io, esp_lcd_pan
     }
 
     ESP_LOGI(TAG,"Initialize fft_input, audio_data, frame_audio_data, spectrum_data");    
-    
-    SetupXiaozhu2UI();
 
     wallpaper_start_auto_change(3600 * 1000);
 }
@@ -553,6 +382,7 @@ void Xiaozhu2Display::UpdateStatusBar(bool update_all) {
                 DisplayLockGuard lock(this);
                 lv_obj_set_flag(idle_screen_status_label_, LV_OBJ_FLAG_HIDDEN, false);
                 lv_label_set_text(idle_screen_status_label_, time_str);
+                ApplyWeatherLabelLayout();
             }
         } else {
             ESP_LOGW(TAG, "System time is not set, tm_year: %d", tm->tm_year);
@@ -1195,15 +1025,27 @@ bool Xiaozhu2Display::random_change_wallpaper() {
     if (!idle_screen_wallpaper_ || wallpaper_urls.empty()) return false;
     auto current_url = current_wallpaper_url_;
 
-    ssize_t count = wallpaper_urls.size();
-    if (count == 1) {
+    ssize_t count = wallpaper_keys.size();
+    if (count == 1 && wallpaper_keys[0] == current_key) {
         return false;
     }
 
-    ssize_t idx;
-    do {
-        idx = esp_random() % count;
-    } while (wallpaper_urls[idx] == current_url);
+    ssize_t idx = 0;
+    if (wallpaper_switch_mode_ == "random") {
+        do {
+            idx = esp_random() % count;
+        } while (count > 1 && wallpaper_keys[idx] == current_key);
+    } else if (wallpaper_switch_mode_ == "sequential") {
+        auto it = std::find(wallpaper_keys.begin(), wallpaper_keys.end(), current_key);
+        if (it != wallpaper_keys.end()) {
+            idx = (std::distance(wallpaper_keys.begin(), it) + 1) % count;
+        }
+    } else {
+        // Fallback to random for unknown mode
+        do {
+            idx = esp_random() % count;
+        } while (count > 1 && wallpaper_keys[idx] == current_key);
+    }
 
 
     // 当场请求壁纸
@@ -1240,7 +1082,8 @@ bool Xiaozhu2Display::random_change_wallpaper() {
     }
 
     http->Close();
-    auto image = std::make_unique<LvglAllocatedImage>(data, content_length);
+    std::unique_ptr<LvglAllocatedImage> image;
+    image = std::make_unique<LvglAllocatedImage>(data, content_length);
 
     preview_image_cached_ = std::move(image);
     auto img_dsc = preview_image_cached_->image_dsc();
@@ -1265,6 +1108,26 @@ bool Xiaozhu2Display::random_change_wallpaper() {
 bool Xiaozhu2Display::RandomChangeWallpaper() {
     DisplayLockGuard lock(this);
     return random_change_wallpaper();
+}
+
+void Xiaozhu2Display::SetWallpaperSwitchConfig(uint32_t interval_ms, const std::string& mode) {
+    wallpaper_switch_mode_ = mode.empty() ? "random" : mode;
+    std::transform(wallpaper_switch_mode_.begin(), wallpaper_switch_mode_.end(),
+                   wallpaper_switch_mode_.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (wallpaper_switch_mode_ != "random" && wallpaper_switch_mode_ != "sequential") {
+        wallpaper_switch_mode_ = "random";
+    }
+    ESP_LOGI(TAG, "配置壁纸自动切换，模式: %s, 间隔: %u ms", wallpaper_switch_mode_.c_str(), interval_ms);
+    wallpaper_start_auto_change(interval_ms > 0 ? interval_ms : wallpaper_switch_interval_ms_);
+}
+
+void Xiaozhu2Display::SetWeatherInfo(const char* info) {
+    DisplayLockGuard lock(this);
+    if (idle_screen_weather_label_ == nullptr) {
+        return;
+    }
+    lv_label_set_text(idle_screen_weather_label_, info);
 }
 
 void Xiaozhu2Display::create_canvas(){
@@ -1365,9 +1228,112 @@ void Xiaozhu2Display::SetTheme(Theme* theme) {
     LcdDisplay::SetTheme(theme);
     DisplayLockGuard lock(this);
 
-    auto lvgl_theme = static_cast<LvglTheme*>(theme);
+    // auto lvgl_theme = static_cast<LvglTheme*>(theme);
 
-    lv_obj_set_style_text_color(idle_screen_status_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(idle_screen_music_info_label_, lvgl_theme->text_color(), 0);
-    lv_obj_set_style_text_color(idle_screen_music_lyrics_label_, lvgl_theme->text_color(), 0);    
+    // lv_obj_set_style_text_color(idle_screen_status_label_, lvgl_theme->text_color(), 0);
+    // lv_obj_set_style_text_color(idle_screen_music_info_label_, lvgl_theme->text_color(), 0);
+    // lv_obj_set_style_text_color(idle_screen_music_lyrics_label_, lvgl_theme->text_color(), 0);    
+}
+
+void Xiaozhu2Display::ApplyWeatherLabelLayout() {
+    if (idle_screen_weather_label_ == nullptr || idle_screen_status_label_ == nullptr || !weather_layout_initialized_) {
+        return;
+    }
+
+    if (weather_position_ == "hidden") {
+        lv_obj_set_flag(idle_screen_weather_label_, LV_OBJ_FLAG_HIDDEN, true);
+        return;
+    }
+
+    lv_obj_set_flag(idle_screen_weather_label_, LV_OBJ_FLAG_HIDDEN, false);
+    if (weather_position_ == "above") {
+        lv_obj_align_to(
+            idle_screen_weather_label_, idle_screen_status_label_, LV_ALIGN_OUT_TOP_MID,
+            weather_offset_x_, weather_offset_y_ - weather_spacing_);
+    } else if (weather_position_ == "below") {
+        lv_obj_align_to(
+            idle_screen_weather_label_, idle_screen_status_label_, LV_ALIGN_OUT_BOTTOM_MID,
+            weather_offset_x_, weather_offset_y_ + weather_spacing_);
+    }
+}
+
+void Xiaozhu2Display::PreviewDeviceParams(const std::string& params_json) {
+    DisplayLockGuard lock(this);
+    if (!setup_ui_called_ || idle_screen_status_label_ == nullptr || idle_screen_weather_label_ == nullptr) {
+        ESP_LOGW(TAG, "Skip PreviewDeviceParams before SetupUI is complete");
+        return;
+    }
+
+    auto json = cJSON_Parse(params_json.c_str());
+    if (json == nullptr) {
+        ESP_LOGE(TAG, "Invalid device params JSON");
+        return;
+    }
+    ESP_LOGI(TAG, "Preview device params: %s", params_json.c_str());
+
+    auto clockPosition = cJSON_GetObjectItem(json, "clockPosition");
+    auto clockOffsetX = cJSON_GetObjectItem(json, "clockOffsetX");
+    auto clockOffsetY = cJSON_GetObjectItem(json, "clockOffsetY");
+    bool clock_updated = false;
+    if (clockPosition != nullptr && cJSON_IsString(clockPosition) &&
+        clockOffsetX != nullptr && cJSON_IsString(clockOffsetX) &&
+        clockOffsetY != nullptr && cJSON_IsString(clockOffsetY)) {
+        auto offsetX = atoi(clockOffsetX->valuestring);
+        auto offsetY = atoi(clockOffsetY->valuestring);
+        if (strcmp(clockPosition->valuestring, "顶部居左") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_TOP_LEFT, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "顶部居中") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_TOP_MID, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "顶部居右") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_TOP_RIGHT, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "底部居左") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_BOTTOM_LEFT, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "底部居中") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_BOTTOM_MID, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "底部居右") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_BOTTOM_RIGHT, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "中间居左") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_LEFT_MID, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "中间居中") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_CENTER, offsetX, offsetY);
+        } else if (strcmp(clockPosition->valuestring, "中间居右") == 0) {
+            lv_obj_align(idle_screen_status_label_, LV_ALIGN_RIGHT_MID, offsetX, offsetY);
+        }
+        clock_updated = true;
+    }
+
+    auto clockColor = cJSON_GetObjectItem(json, "clockColor");
+    if (clockColor != nullptr && cJSON_IsString(clockColor) &&
+        clockColor->valuestring != nullptr && clockColor->valuestring[0] == '#') {
+        uint32_t color_ = strtoul(clockColor->valuestring + 1, nullptr, 16); // 跳过 '#' 字符
+        lv_color_t color = lv_color_make((color_ >> 16) & 0xFF, (color_ >> 8) & 0xFF, color_ & 0xFF);
+        lv_obj_set_style_text_color(idle_screen_status_label_, color, 0);
+        lv_obj_set_style_text_color(idle_screen_weather_label_, color, 0);
+    }
+    
+    auto weatherPosition = cJSON_GetObjectItem(json, "weatherPosition");
+    auto weatherOffsetX = cJSON_GetObjectItem(json, "weatherOffsetX");
+    auto weatherOffsetY = cJSON_GetObjectItem(json, "weatherOffsetY");
+    auto weatherSpacing = cJSON_GetObjectItem(json, "weatherSpacing");
+    bool weather_updated = false;
+    if (weatherPosition != nullptr && cJSON_IsString(weatherPosition) &&
+        weatherOffsetX != nullptr && cJSON_IsString(weatherOffsetX) &&
+        weatherOffsetY != nullptr && cJSON_IsString(weatherOffsetY)) {
+        weather_position_ = weatherPosition->valuestring != nullptr ? weatherPosition->valuestring : "hidden";
+        weather_offset_x_ = atoi(weatherOffsetX->valuestring);
+        weather_offset_y_ = atoi(weatherOffsetY->valuestring);
+        weather_spacing_ = 0;
+        if (weatherSpacing != nullptr && cJSON_IsString(weatherSpacing) && weatherSpacing->valuestring != nullptr) {
+            weather_spacing_ = atoi(weatherSpacing->valuestring);
+        }
+        weather_layout_initialized_ = true;
+        weather_updated = true;
+    }
+
+    // weatherPosition 是相对时钟的布局；时钟或天气任一参数变化都需要重排天气标签。
+    if (weather_updated || clock_updated) {
+        ApplyWeatherLabelLayout();
+    }
+
+    cJSON_Delete(json);
 }
