@@ -74,6 +74,7 @@ public:
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
     virtual void SendDirectMessageToChat(const std::string& message);
+    virtual void GetWeather(const std::string& location);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;

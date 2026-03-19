@@ -50,6 +50,8 @@ public:
     virtual void SetWallpaper(std::unique_ptr<LvglImage> image);
     virtual void AddWallpaperToCollection(const std::string& key);
     virtual bool RandomChangeWallpaper();
+    virtual void SetWallpaperSwitchConfig(uint32_t interval_ms, const std::string& mode) {}
+    virtual void SetWeatherInfo(const char* info) {}
 
     virtual void SetMusicInfoVisible(bool visible) {}
     virtual void SetMusicInfo(const char* text) {}

@@ -87,6 +87,28 @@ void Protocol::SendDirectMessageToChat(const std::string& message) {
     printf("Sent direct message to chat: %s\n", text.c_str());
 }
 
+void Protocol::GetWeather(const std::string& location) {
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", "hello");
+    cJSON_AddNumberToObject(root, "version", 3);
+    auto json_str = cJSON_PrintUnformatted(root);
+    std::string message(json_str);
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+    if (SendText(message)) {
+        ESP_LOGI(TAG, "Sent weather request for location: %s", location.c_str());
+    } else {
+        ESP_LOGE(TAG, "Failed to send weather request for location: %s", location.c_str());
+    }
+
+    message = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"get_weather\",\"location\":\"" + location + "\"}";
+    if (SendText(message)) {
+        ESP_LOGI(TAG, "Requested weather for location: %s", location.c_str());
+    } else {
+        ESP_LOGE(TAG, "Failed to request weather for location: %s", location.c_str());
+    }
+}
+
 bool Protocol::IsTimeout() const {
     const int kTimeoutSeconds = 120;
     auto now = std::chrono::steady_clock::now();

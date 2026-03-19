@@ -16,6 +16,7 @@
 #include <driver/spi_common.h>
 #include <wifi_station.h>
 #include "power_manager.h"
+#include "power_save_timer.h"
 #include <esp_lvgl_port.h>
 #include <lvgl.h>
 #include "settings.h"
@@ -24,11 +25,13 @@
 #include <sdmmc_cmd.h>
 #include <esp_vfs_fat.h>
 #include <driver/sdmmc_host.h>
+#include <esp_sleep.h>
 
 #include <ssid_manager.h>
+#include <cctype>
 
-#define FIRST_BOOT_NS "boot_config"  
-#define FIRST_BOOT_KEY "is_first"    
+#define FIRST_BOOT_NS "boot_config"
+#define FIRST_BOOT_KEY "is_first"
 
 
 #define TAG "Xiaozhu2Board"
@@ -86,15 +89,174 @@ public:
 class XiaoZhu2Board : public WifiBoard {
 private:
     i2c_master_bus_handle_t i2c_bus_;
-    // i2c_master_dev_handle_t pca9557_handle_;
     Button boot_button_;
     Button volume_up_button_;
     Button volume_down_button_;
     Xiaozhu2Display* display_ = nullptr;
-    // Pca9557* pca9557_;
     Esp32Camera* camera_;
     PowerManager* power_manager_ = new PowerManager(GPIO_NUM_9);
+    PowerSaveTimer* power_save_timer_ = nullptr;
     Esp32Music* music_;
+    bool block_sleep_when_music_playing_ = false;
+    int wallpaper_switch_interval_ms_ = 60000;
+    std::string wallpaper_switch_mode_ = "random";
+    std::string local_music_play_end_action_ = "stop";
+    std::string weather_region_ = "auto";
+
+    void RefreshPowerSaveTimerState() {
+        if (power_save_timer_ == nullptr) {
+            return;
+        }
+        auto music = GetMusic();
+        bool is_music_playing = (music != nullptr && music->IsPlaying());
+        bool should_block_sleep = block_sleep_when_music_playing_ && is_music_playing;
+        power_save_timer_->SetEnabled(!should_block_sleep);
+    }
+
+    int ParseDurationSeconds(const cJSON* item, int default_value) {
+        if (item == nullptr || !cJSON_IsString(item) || item->valuestring == nullptr) {
+            return default_value;
+        }
+
+        std::string value = item->valuestring;
+        while (!value.empty() && std::isspace(static_cast<unsigned char>(value.back()))) {
+            value.pop_back();
+        }
+        size_t start = 0;
+        while (start < value.size() && std::isspace(static_cast<unsigned char>(value[start]))) {
+            start++;
+        }
+        value = value.substr(start);
+        if (value.empty()) {
+            return default_value;
+        }
+
+        std::string lower = value;
+        for (char& ch : lower) {
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        }
+        if (lower == "off" || lower == "never" || lower == "none" || lower == "no_sleep") {
+            return -1;
+        }
+
+        int multiplier = 1;
+        if (!std::isdigit(static_cast<unsigned char>(value.back()))) {
+            char unit = static_cast<char>(std::tolower(static_cast<unsigned char>(value.back())));
+            value.pop_back();
+            if (unit == 's') {
+                multiplier = 1;
+            } else if (unit == 'm') {
+                multiplier = 60;
+            } else if (unit == 'h') {
+                multiplier = 3600;
+            } else {
+                return default_value;
+            }
+        }
+
+        if (value.empty()) {
+            return default_value;
+        }
+
+        char* end_ptr = nullptr;
+        long number = strtol(value.c_str(), &end_ptr, 10);
+        if (end_ptr == value.c_str() || *end_ptr != '\0' || number <= 0) {
+            return default_value;
+        }
+
+        return static_cast<int>(number) * multiplier;
+    }
+
+    void ApplyPowerTimersFromParams(const std::string& params_json) {
+        int screen_off_seconds = -1;
+        int auto_power_off_seconds = -1;
+        block_sleep_when_music_playing_ = false;
+
+        auto* json = cJSON_Parse(params_json.c_str());
+        if (json != nullptr) {
+            screen_off_seconds = ParseDurationSeconds(cJSON_GetObjectItem(json, "screenOffTime"), -1);
+            auto_power_off_seconds = ParseDurationSeconds(cJSON_GetObjectItem(json, "autoPowerOff"), -1);
+            int switch_interval_seconds =
+                ParseDurationSeconds(cJSON_GetObjectItem(json, "switchInterval"), 60);
+            if (switch_interval_seconds > 0) {
+                wallpaper_switch_interval_ms_ = switch_interval_seconds * 1000;
+            }
+
+            auto* switch_mode = cJSON_GetObjectItem(json, "switchMode");
+            if (switch_mode != nullptr && cJSON_IsString(switch_mode) && switch_mode->valuestring != nullptr) {
+                wallpaper_switch_mode_ = switch_mode->valuestring;
+            }
+
+            auto* local_music_end = cJSON_GetObjectItem(json, "localMusicEnd");
+            if (local_music_end != nullptr && cJSON_IsString(local_music_end) && local_music_end->valuestring != nullptr) {
+                local_music_play_end_action_ = local_music_end->valuestring;
+            }
+
+            auto* music_during = cJSON_GetObjectItem(json, "musicDuring");
+            if (music_during != nullptr && cJSON_IsString(music_during) && music_during->valuestring != nullptr) {
+                std::string value = music_during->valuestring;
+                for (char& ch : value) {
+                    ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+                }
+                // If musicDuringValue == "no_sleep", block sleep while music is playing.
+                block_sleep_when_music_playing_ = (value == "no_sleep");
+            }
+
+            auto* weather_region_item = cJSON_GetObjectItem(json, "weatherRegion");
+            if (weather_region_item != nullptr && cJSON_IsString(weather_region_item) && weather_region_item->valuestring != nullptr) {
+                weather_region_ = weather_region_item->valuestring;
+            }
+            cJSON_Delete(json);
+        } else {
+            ESP_LOGW(TAG, "ApplyPowerTimersFromParams ignored invalid JSON, keep defaults");
+        }
+
+        if (display_ != nullptr) {
+            display_->SetWallpaperSwitchConfig(static_cast<uint32_t>(wallpaper_switch_interval_ms_),
+                                               wallpaper_switch_mode_);
+        }
+
+        // 如果永不熄屏, 那么自动关机也永不触发
+        if (screen_off_seconds == -1) {
+            auto_power_off_seconds = -1;
+        }
+
+        if (auto_power_off_seconds != -1 && screen_off_seconds != -1) {
+            auto_power_off_seconds += screen_off_seconds;
+        }
+
+        if (power_save_timer_ != nullptr) {
+            delete power_save_timer_;
+            power_save_timer_ = nullptr;
+        }
+
+        power_save_timer_ = new PowerSaveTimer(-1, screen_off_seconds, auto_power_off_seconds);
+        power_save_timer_->OnEnterSleepMode([this]() {
+            ESP_LOGI(TAG, "进入睡眠模式，屏幕将关闭");
+            GetDisplay()->SetPowerSaveMode(true);
+            GetBacklight()->SetBrightness(1);
+        });
+        power_save_timer_->OnExitSleepMode([this]() {
+            ESP_LOGI(TAG, "退出睡眠模式，屏幕将打开");
+            GetDisplay()->SetPowerSaveMode(false);
+            GetBacklight()->RestoreBrightness();
+        });
+        power_save_timer_->OnShutdownRequest([this]() {
+            ESP_LOGI(TAG, "进入深度睡眠模式");
+            GetDisplay()->SetPowerSaveMode(true);
+            esp_deep_sleep_start();
+        });
+
+        RefreshPowerSaveTimerState();
+
+        ESP_LOGI(TAG, "配置熄屏时间: %d秒, 自动关机时间: %d秒, 音乐播放时%s睡眠", 
+                 screen_off_seconds, auto_power_off_seconds, block_sleep_when_music_playing_ ? "阻止" : "允许");
+    }
+
+    void InitializePowerSaveTimer() {
+        ApplyPowerTimersFromParams(GetDeviceParams());
+        ESP_LOGI(TAG, "Power save timer initialized");
+    }
 
     void InitializeI2c() {
         // Initialize I2C peripheral
@@ -111,9 +273,6 @@ private:
             },
         };
         ESP_ERROR_CHECK(i2c_new_master_bus(&i2c_bus_cfg, &i2c_bus_));
-
-        // Initialize PCA9557
-        // pca9557_ = new Pca9557(i2c_bus_, 0x19);
     }
 
     void InitializeSpi() {
@@ -129,6 +288,9 @@ private:
 
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
@@ -138,6 +300,9 @@ private:
         });
 
         boot_button_.OnDoubleClick([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             Settings settings(FIRST_BOOT_NS, true);
             bool is_first_boot = settings.GetInt(FIRST_BOOT_KEY, 1) != 0;
             if (is_first_boot) {
@@ -160,12 +325,18 @@ private:
         });
 
         boot_button_.OnLongPress([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             auto& app = Application::GetInstance();
             app.SetDeviceState(kDeviceStateWifiConfiguring);
             EnterWifiConfigMode();
         });
 
         volume_up_button_.OnClick([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() + 10;
             if (volume > 100) {
@@ -177,11 +348,17 @@ private:
         });
 
         volume_up_button_.OnLongPress([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             // GetAudioCodec()->SetOutputVolume(100);
             // GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
         });
 
         volume_down_button_.OnClick([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             auto codec = GetAudioCodec();
             auto volume = codec->output_volume() - 10;
             if (volume < 0) {
@@ -192,11 +369,17 @@ private:
         });
 
         volume_down_button_.OnLongPress([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             GetAudioCodec()->SetOutputVolume(0);
             GetDisplay()->ShowNotification(Lang::Strings::MUTED);
         });
 
         volume_down_button_.OnDoubleClick([this]() {
+            if (power_save_timer_ != nullptr) {
+                power_save_timer_->WakeUp();
+            }
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() != kDeviceStateAudioTesting) {
                 app.GetAudioService().EnableAudioTesting(true);
@@ -499,41 +682,6 @@ private:
         music_->SetLocalMusicDir(SD_CARD_MOUNT_POINT"/Music/");
         music_->InitializeLocalMusicFiles();
     }
-    
-    void InitializeCamera() {
-        // Open camera power
-        // pca9557_->SetOutputState(2, 0);
-
-        // camera_config_t config = {};
-        // config.ledc_channel = LEDC_CHANNEL_2;  // LEDC通道选择  用于生成XCLK时钟 但是S3不用
-        // config.ledc_timer = LEDC_TIMER_2; // LEDC timer选择  用于生成XCLK时钟 但是S3不用
-        // config.pin_d0 = CAMERA_PIN_D0;
-        // config.pin_d1 = CAMERA_PIN_D1;
-        // config.pin_d2 = CAMERA_PIN_D2;
-        // config.pin_d3 = CAMERA_PIN_D3;
-        // config.pin_d4 = CAMERA_PIN_D4;
-        // config.pin_d5 = CAMERA_PIN_D5;
-        // config.pin_d6 = CAMERA_PIN_D6;
-        // config.pin_d7 = CAMERA_PIN_D7;
-        // config.pin_xclk = CAMERA_PIN_XCLK;
-        // config.pin_pclk = CAMERA_PIN_PCLK;
-        // config.pin_vsync = CAMERA_PIN_VSYNC;
-        // config.pin_href = CAMERA_PIN_HREF;
-        // config.pin_sccb_sda = -1;   // 这里�?-1 表示使用已经初始化的I2C接口
-        // config.pin_sccb_scl = CAMERA_PIN_SIOC;
-        // config.sccb_i2c_port = 1;
-        // config.pin_pwdn = CAMERA_PIN_PWDN;
-        // config.pin_reset = CAMERA_PIN_RESET;
-        // config.xclk_freq_hz = XCLK_FREQ_HZ;
-        // config.pixel_format = PIXFORMAT_RGB565;
-        // config.frame_size = FRAMESIZE_VGA;
-        // config.jpeg_quality = 9;
-        // config.fb_count = 1;
-        // config.fb_location = CAMERA_FB_IN_PSRAM;
-        // config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
-
-        // camera_ = new Esp32Camera(config);
-    }
 
 	void InitializeController() { InitializeMCPController(); }
 
@@ -544,8 +692,9 @@ public:
         InitializeSpi();
         InitializeSt7789Display();
         InitializeButtons();
+        music_ = new Esp32Music();
+        InitializePowerSaveTimer();
         InitializeSdCard();
-        InitializeCamera();
 		InitializeController();
         InitializeTools();
         GetBacklight()->RestoreBrightness();
@@ -554,7 +703,6 @@ public:
 	    gpio_set_level(PA_ENABLE_GPIO,1);
         gpio_set_direction(VOLUME_UP_BUTTON_GPIO,GPIO_MODE_OUTPUT);
 	    gpio_set_level(VOLUME_UP_BUTTON_GPIO,1);
-        music_ = new Esp32Music();
 	}
 
     virtual AudioCodec* GetAudioCodec() override {
@@ -574,6 +722,7 @@ public:
 
     virtual bool GetBatteryLevel(int& level, bool& charging, bool& discharging)  override {
         static bool last_discharging = false;
+        RefreshPowerSaveTimerState();
         charging = power_manager_->IsCharging();
         discharging = power_manager_->IsDischarging();
         if (discharging != last_discharging) {
@@ -600,6 +749,38 @@ public:
 
     virtual Esp32Music* GetMusic() override {
         return music_;
+    }
+
+    virtual void SetDeviceParams(const std::string& params_json) override {
+        Settings settings("device_params", true);
+        cJSON* root = cJSON_Parse(params_json.c_str());
+        if (!root) {
+            ESP_LOGE(TAG, "Failed to parse device params JSON");
+            return;
+        }
+        ESP_LOGI(TAG, "Save device params JSON: %s", params_json.c_str());
+        settings.EraseKey("device_params");
+        settings.SetString("device_params", params_json);
+        cJSON_Delete(root);
+
+        // Apply immediately if UI is already initialized.
+        if (display_ != nullptr && display_->IsSetupUICalled()) {
+            display_->PreviewDeviceParams(params_json);
+        }
+        ApplyPowerTimersFromParams(params_json);
+    }
+
+    virtual std::string GetDeviceParams() override {
+        Settings settings("device_params");
+        return settings.GetString("device_params", "{}");
+    }
+
+    virtual std::string GetWeatherRegion() override {
+        size_t last_pipe = weather_region_.rfind('|');
+        if (last_pipe != std::string::npos) {
+            return weather_region_.substr(last_pipe + 1);
+        }
+        return weather_region_;
     }
 };
 
