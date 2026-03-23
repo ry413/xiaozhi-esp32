@@ -78,6 +78,15 @@ void Protocol::SendMcpMessage(const std::string& payload) {
     SendText(message);
 }
 
+void Protocol::SendDirectMessageToChat(const std::string& message) {
+    std::string text = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"direct_chat\",\"message\":\"" + message + "\"}";
+    if (!SendText(text)) {
+        ESP_LOGE(TAG, "Failed to send direct message to chat: %s", message.c_str());
+        return;
+    }
+    printf("Sent direct message to chat: %s\n", text.c_str());
+}
+
 bool Protocol::IsTimeout() const {
     const int kTimeoutSeconds = 120;
     auto now = std::chrono::steady_clock::now();

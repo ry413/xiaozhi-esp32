@@ -168,6 +168,19 @@ void McpServer::AddUserOnlyTools() {
             return true;
         });
 
+    AddUserOnlyTool("self.direct_chat",
+            "直接向后端LLM发送消息",
+            PropertyList({
+                Property("message", kPropertyTypeString)
+            }),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto message = properties["message"].value<std::string>();
+                ESP_LOGI(TAG, "Direct chat message: %s", message.c_str());
+                auto& app = Application::GetInstance();
+                app.SendDirectMessageToChat(message);
+                return true;
+        });
+
     // Display control
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
