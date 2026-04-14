@@ -536,6 +536,23 @@ void Application::InitializeProtocol() {
                         } else {
                             SetDeviceState(kDeviceStateListening);
                         }
+                        ESP_LOGI(TAG, "TTS完成, 可以接受下一条输入了");
+                        if (allow_send_prompt_task_handle_ != nullptr) {
+                            ESP_LOGW(TAG, "AllowSendPrompt task already running, skip");
+                            return;
+                        }
+                        BaseType_t ret = xTaskCreate([](void* arg) {
+                            Application* app = static_cast<Application*>(arg);
+                            app->AllowSendPrompt();
+                            app->Schedule([app]() {
+                                app->allow_send_prompt_task_handle_ = nullptr;
+                            });
+                            vTaskDelete(nullptr);
+                        }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
+                        if (ret != pdPASS) {
+                            allow_send_prompt_task_handle_ = nullptr;
+                            ESP_LOGE(TAG, "Failed to create AllowSendPrompt task");
+                        }
                     }
                 });
             } else if (strcmp(state->valuestring, "sentence_start") == 0) {
@@ -1125,3 +1142,38 @@ void Application::ResetProtocol() {
     });
 }
 
+esp_err_t Application::AllowSendPrompt() {
+    auto& board = Board::GetInstance();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(1);
+    http->SetHeader("Content-Length", "0");
+    std::string ota_url = CONFIG_OTA_URL;
+    auto scheme_end = ota_url.find("://");
+    auto host_start = scheme_end == std::string::npos ? std::string::npos : scheme_end + 3;
+    auto path_start = host_start == std::string::npos ? std::string::npos : ota_url.find('/', host_start);
+
+    if (scheme_end == std::string::npos) {
+        ESP_LOGE(TAG, "Invalid OTA URL: %s", CONFIG_OTA_URL);
+        return ESP_FAIL;
+    }
+
+    std::string url = ota_url.substr(0, path_start) + "/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress();
+
+    if (!http->Open("POST", url)) {
+        ESP_LOGE(TAG, "Failed to open allow prompt URL");
+        return ESP_FAIL;
+    }
+
+    auto status_code = http->GetStatusCode();
+    if (status_code == 202) {
+        http->Close();
+        return ESP_ERR_TIMEOUT;
+    }
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        http->Close();
+        return ESP_FAIL;
+    }
+    http->Close();
+    return ESP_OK;
+}

@@ -87,6 +87,7 @@ private:
                 EnterWifiConfigMode();
             }
             app.ToggleChatState();
+            app.AllowSendPrompt();
         });
 
         volume_up_button_.OnClick([this]() {

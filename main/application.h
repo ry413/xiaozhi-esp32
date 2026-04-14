@@ -120,6 +120,7 @@ public:
      * This includes closing audio channel, resetting protocol and ota objects
      */
     void ResetProtocol();
+    esp_err_t AllowSendPrompt();
 
 private:
     Application();
@@ -143,6 +144,7 @@ private:
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
+    TaskHandle_t allow_send_prompt_task_handle_ = nullptr;
 
 
     // Event handlers

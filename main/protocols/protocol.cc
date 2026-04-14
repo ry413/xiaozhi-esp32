@@ -79,7 +79,15 @@ void Protocol::SendMcpMessage(const std::string& payload) {
 }
 
 void Protocol::SendDirectMessageToChat(const std::string& message) {
-    std::string text = "{\"session_id\":\"" + session_id_ + "\",\"type\":\"direct_chat\",\"message\":\"" + message + "\"}";
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "session_id", session_id_.c_str());
+    cJSON_AddStringToObject(root, "type", "direct_chat");
+    cJSON_AddStringToObject(root, "message", message.c_str());
+    char* json_str = cJSON_PrintUnformatted(root);
+    std::string text = json_str != nullptr ? json_str : "";
+    cJSON_free(json_str);
+    cJSON_Delete(root);
+
     if (!SendText(text)) {
         ESP_LOGE(TAG, "Failed to send direct message to chat: %s", message.c_str());
         return;

@@ -120,6 +120,7 @@ private:
             }
             if (!press_to_talk_tool_ || !press_to_talk_tool_->IsPressToTalkEnabled()) {
                 app.ToggleChatState();
+                app.AllowSendPrompt();
             }
         });
         boot_button_.OnPressDown([this]() {

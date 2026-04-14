@@ -67,7 +67,8 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
     auto client_id = settings.GetString("client_id");
     auto username = settings.GetString("username");
     auto password = settings.GetString("password");
-    int keepalive_interval = settings.GetInt("keepalive", 240);
+    // int keepalive_interval = settings.GetInt("keepalive", 240);
+    int keepalive_interval = 30;
     publish_topic_ = settings.GetString("publish_topic");
 
     if (endpoint.empty()) {

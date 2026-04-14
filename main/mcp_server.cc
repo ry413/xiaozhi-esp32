@@ -181,6 +181,18 @@ void McpServer::AddUserOnlyTools() {
                 return true;
         });
 
+        
+    AddUserOnlyTool("self.enter_chat_state",
+        "Toggle the chat state of the device. If the device is currently in idle state, it will enter listening state and wait for user input. If the device is currently in listening state, it will enter idle state and stop accepting user input.",
+        PropertyList(),
+        [this](const PropertyList& properties) -> ReturnValue {
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateIdle) {
+                app.ToggleChatState();
+            }
+            return true;
+    });
+
     // Display control
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
