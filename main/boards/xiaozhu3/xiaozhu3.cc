@@ -90,6 +90,15 @@ private:
             app.AllowSendPrompt();
         });
 
+        boot_button_.OnLongPress([this]() {
+            power_save_timer_->WakeUp();
+            auto& app = Application::GetInstance();
+            // 进入配网模式
+            // app.SetDeviceState(kDeviceStateWifiConfiguring);
+            // 重置WiFi配置以确保进入配网模式
+            EnterWifiConfigMode();
+        });
+
         volume_up_button_.OnClick([this]() {
             power_save_timer_->WakeUp();
             auto codec = GetAudioCodec();

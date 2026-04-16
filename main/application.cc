@@ -1160,6 +1160,7 @@ esp_err_t Application::AllowSendPrompt() {
     std::string url = ota_url.substr(0, path_start) + "/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress();
 
     if (!http->Open("POST", url)) {
+    // if (!http->Open("POST", "http://192.168.224.163:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
         ESP_LOGE(TAG, "Failed to open allow prompt URL");
         return ESP_FAIL;
     }
