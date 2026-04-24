@@ -531,21 +531,28 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     if (GetDeviceState() == kDeviceStateSpeaking) {
-                        if (listening_mode_ == kListeningModeManualStop) {
-                            SetDeviceState(kDeviceStateIdle);
-                        } else {
-                            SetDeviceState(kDeviceStateListening);
-                        }
-                        ESP_LOGI(TAG, "TTS完成, 可以接受下一条输入了");
+                        SetDeviceState(kDeviceStateIdle);
+                        ESP_LOGI(TAG, "TTS完成, 等待 allow-prompt 放行下一轮输入");
                         if (allow_send_prompt_task_handle_ != nullptr) {
                             ESP_LOGW(TAG, "AllowSendPrompt task already running, skip");
                             return;
                         }
                         BaseType_t ret = xTaskCreate([](void* arg) {
                             Application* app = static_cast<Application*>(arg);
-                            app->AllowSendPrompt();
-                            app->Schedule([app]() {
+                            esp_err_t err = app->AllowSendPrompt();
+                            app->Schedule([app, err]() {
                                 app->allow_send_prompt_task_handle_ = nullptr;
+                                if (app->GetDeviceState() != kDeviceStateIdle) {
+                                    return;
+                                }
+                                if (err != ESP_OK) {
+                                    ESP_LOGW(TAG, "AllowSendPrompt failed: %s", esp_err_to_name(err));
+                                    return;
+                                }
+                                if (app->listening_mode_ != kListeningModeManualStop) {
+                                    ESP_LOGI(TAG, "AllowSendPrompt succeeded, re-enter listening state");
+                                    app->SetDeviceState(kDeviceStateListening);
+                                }
                             });
                             vTaskDelete(nullptr);
                         }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
@@ -1157,18 +1164,19 @@ esp_err_t Application::AllowSendPrompt() {
     std::string url = ota_url.substr(0, path_start) + "/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress();
 
     if (!http->Open("POST", url)) {
-    // if (!http->Open("POST", "http://192.168.224.163:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
+    // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
         ESP_LOGE(TAG, "Failed to open allow prompt URL");
         return ESP_FAIL;
     }
 
     auto status_code = http->GetStatusCode();
+    std::string response_body = http->ReadAll();
     if (status_code == 202) {
         http->Close();
         return ESP_ERR_TIMEOUT;
     }
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, http->ReadAll().c_str());
+        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, response_body.c_str());
         http->Close();
         return ESP_FAIL;
     }

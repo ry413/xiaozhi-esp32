@@ -13,6 +13,8 @@
 #include <esp_log.h>
 #include <esp_lcd_panel_vendor.h>
 #include <wifi_station.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -87,7 +89,11 @@ private:
                 EnterWifiConfigMode();
             }
             app.ToggleChatState();
-            app.AllowSendPrompt();
+            xTaskCreate([](void*) {
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                Application::GetInstance().AllowSendPrompt();
+                vTaskDelete(nullptr);
+            }, "allow_prompt_delay", 4096, nullptr, 5, nullptr);
         });
 
         boot_button_.OnLongPress([this]() {
