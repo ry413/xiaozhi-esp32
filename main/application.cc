@@ -1151,20 +1151,9 @@ esp_err_t Application::AllowSendPrompt() {
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(1);
     http->SetHeader("Content-Length", "0");
-    std::string ota_url = CONFIG_OTA_URL;
-    auto scheme_end = ota_url.find("://");
-    auto host_start = scheme_end == std::string::npos ? std::string::npos : scheme_end + 3;
-    auto path_start = host_start == std::string::npos ? std::string::npos : ota_url.find('/', host_start);
 
-    if (scheme_end == std::string::npos) {
-        ESP_LOGE(TAG, "Invalid OTA URL: %s", CONFIG_OTA_URL);
-        return ESP_FAIL;
-    }
-
-    std::string url = ota_url.substr(0, path_start) + "/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress();
-
-    if (!http->Open("POST", url)) {
     // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
+    if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
         ESP_LOGE(TAG, "Failed to open allow prompt URL");
         return ESP_FAIL;
     }
