@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
@@ -114,6 +115,7 @@ public:
     std::unique_ptr<AudioStreamPacket> PopWakeWordPacket();
     const std::string& GetLastWakeWord() const;
     bool IsVoiceDetected() const { return voice_detected_; }
+    bool IsMicrophoneEnabled() const { return microphone_enabled_.load(); }
     bool IsIdle();
     void WaitForPlaybackQueueEmpty();
     bool IsWakeWordRunning() const { return xEventGroupGetBits(event_group_) & AS_EVENT_WAKE_WORD_RUNNING; }
@@ -124,6 +126,7 @@ public:
     void EnableVoiceProcessing(bool enable);
     void EnableAudioTesting(bool enable);
     void EnableDeviceAec(bool enable);
+    void SetMicrophoneEnabled(bool enable);
 
     void SetCallbacks(AudioServiceCallbacks& callbacks);
 
@@ -177,6 +180,7 @@ private:
     bool wake_word_initialized_ = false;
     bool audio_processor_initialized_ = false;
     bool voice_detected_ = false;
+    std::atomic_bool microphone_enabled_ = true;
     bool service_stopped_ = true;
     bool audio_input_need_warmup_ = false;
 

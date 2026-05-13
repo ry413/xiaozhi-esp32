@@ -182,6 +182,10 @@ void AudioService::Stop() {
 }
 
 bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, int samples) {
+    if (!microphone_enabled_.load()) {
+        return false;
+    }
+
     if (!codec_->input_enabled()) {
         esp_timer_stop(audio_power_timer_);
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
@@ -244,6 +248,10 @@ void AudioService::AudioInputTask() {
 
         /* Used for audio testing in NetworkConfiguring mode by clicking the BOOT button */
         if (bits & AS_EVENT_AUDIO_TESTING_RUNNING) {
+            if (!microphone_enabled_.load()) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
             if (audio_testing_queue_.size() >= AUDIO_TESTING_MAX_DURATION_MS / OPUS_FRAME_DURATION_MS) {
                 ESP_LOGW(TAG, "Audio testing queue is full, stopping audio testing");
                 EnableAudioTesting(false);
@@ -252,6 +260,9 @@ void AudioService::AudioInputTask() {
             std::vector<int16_t> data;
             int samples = OPUS_FRAME_DURATION_MS * 16000 / 1000;
             if (ReadAudioData(data, 16000, samples)) {
+                if (!microphone_enabled_.load()) {
+                    continue;
+                }
                 // If input channels is 2, we need to fetch the left channel data
                 if (codec_->input_channels() == 2) {
                     auto mono_data = std::vector<int16_t>(data.size() / 2);
@@ -267,9 +278,16 @@ void AudioService::AudioInputTask() {
 
         /* Feed the wake word and/or audio processor */
         if (bits & (AS_EVENT_WAKE_WORD_RUNNING | AS_EVENT_AUDIO_PROCESSOR_RUNNING)) {
+            if (!microphone_enabled_.load()) {
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
+            }
             int samples = 160; // 10ms
             std::vector<int16_t> data;
             if (ReadAudioData(data, 16000, samples)) {
+                if (!microphone_enabled_.load()) {
+                    continue;
+                }
                 if (bits & AS_EVENT_WAKE_WORD_RUNNING) {
                     wake_word_->Feed(data);
                 }
@@ -482,6 +500,10 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
 }
 
 void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t>&& pcm) {
+    if (!microphone_enabled_.load() && type != kAudioTaskTypeDecodeToPlaybackQueue) {
+        return;
+    }
+
     auto task = std::make_unique<AudioTask>();
     task->type = type;
     task->pcm = std::move(pcm);
@@ -624,6 +646,30 @@ void AudioService::EnableDeviceAec(bool enable) {
     }
 
     audio_processor_->EnableDeviceAec(enable);
+}
+
+void AudioService::SetMicrophoneEnabled(bool enable) {
+    bool previous = microphone_enabled_.exchange(enable);
+    if (previous == enable) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "%s microphone", enable ? "Enabling" : "Disabling");
+
+    if (!enable) {
+        voice_detected_ = false;
+        if (codec_ && codec_->input_enabled()) {
+            codec_->EnableInput(false);
+        }
+
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        audio_encode_queue_.clear();
+        audio_send_queue_.clear();
+        audio_testing_queue_.clear();
+        audio_queue_cv_.notify_all();
+    } else {
+        audio_input_need_warmup_ = true;
+    }
 }
 
 void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {

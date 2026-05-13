@@ -20,6 +20,30 @@
 
 #define TAG "MCP"
 
+namespace {
+bool ParseBooleanArgument(const cJSON* value, bool& out) {
+    if (cJSON_IsBool(value)) {
+        out = cJSON_IsTrue(value);
+        return true;
+    }
+    if (cJSON_IsNumber(value)) {
+        out = value->valueint != 0;
+        return true;
+    }
+    if (cJSON_IsString(value)) {
+        if (strcasecmp(value->valuestring, "true") == 0 || strcmp(value->valuestring, "1") == 0) {
+            out = true;
+            return true;
+        }
+        if (strcasecmp(value->valuestring, "false") == 0 || strcmp(value->valuestring, "0") == 0) {
+            out = false;
+            return true;
+        }
+    }
+    return false;
+}
+}
+
 McpServer::McpServer() {
 }
 
@@ -60,6 +84,20 @@ void McpServer::AddCommonTools() {
         [&board](const PropertyList& properties) -> ReturnValue {
             auto codec = board.GetAudioCodec();
             codec->SetOutputVolume(properties["volume"].value<int>());
+            return true;
+        });
+
+    AddTool("self.audio_microphone.set_enabled",
+        "Enable or disable the device microphone in software while the device is running. When disabled, the device stops reading microphone audio and clears pending microphone packets.",
+        PropertyList({
+            Property("enabled", kPropertyTypeBoolean)
+        }),
+        [](const PropertyList& properties) -> ReturnValue {
+            bool enabled = properties["enabled"].value<bool>();
+            auto& app = Application::GetInstance();
+            app.Schedule([&app, enabled]() {
+                app.GetAudioService().SetMicrophoneEnabled(enabled);
+            });
             return true;
         });
     
@@ -551,9 +589,12 @@ void McpServer::DoToolCall(int id, const std::string& tool_name, const cJSON* to
             bool found = false;
             if (cJSON_IsObject(tool_arguments)) {
                 auto value = cJSON_GetObjectItem(tool_arguments, argument.name().c_str());
-                if (argument.type() == kPropertyTypeBoolean && cJSON_IsBool(value)) {
-                    argument.set_value<bool>(value->valueint == 1);
-                    found = true;
+                if (argument.type() == kPropertyTypeBoolean) {
+                    bool bool_value = false;
+                    if (ParseBooleanArgument(value, bool_value)) {
+                        argument.set_value<bool>(bool_value);
+                        found = true;
+                    }
                 } else if (argument.type() == kPropertyTypeInteger && cJSON_IsNumber(value)) {
                     argument.set_value<int>(value->valueint);
                     found = true;
