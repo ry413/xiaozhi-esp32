@@ -89,20 +89,6 @@ private:
                 EnterWifiConfigMode();
             }
             app.ToggleChatState();
-            xTaskCreate([](void*) {
-                vTaskDelay(pdMS_TO_TICKS(2000));
-                Application::GetInstance().AllowSendPrompt();
-                vTaskDelete(nullptr);
-            }, "allow_prompt_delay", 4096, nullptr, 5, nullptr);
-        });
-
-        boot_button_.OnLongPress([this]() {
-            power_save_timer_->WakeUp();
-            auto& app = Application::GetInstance();
-            // 进入配网模式
-            // app.SetDeviceState(kDeviceStateWifiConfiguring);
-            // 重置WiFi配置以确保进入配网模式
-            EnterWifiConfigMode();
         });
 
         volume_up_button_.OnClick([this]() {

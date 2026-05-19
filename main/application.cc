@@ -318,6 +318,12 @@ void Application::HandleActivationDoneEvent() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
     });
+
+    xTaskCreate([](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+        app->AutoStartThalora();
+        vTaskDelete(NULL);
+    }, "autoStartThalora", 4096, this, 5, nullptr);
 }
 
 void Application::ActivationTask() {
@@ -530,35 +536,57 @@ void Application::InitializeProtocol() {
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
-                    if (GetDeviceState() == kDeviceStateSpeaking) {
-                        SetDeviceState(kDeviceStateIdle);
-                        ESP_LOGI(TAG, "TTS完成, 等待 allow-prompt 放行下一轮输入");
-                        if (allow_send_prompt_task_handle_ != nullptr) {
-                            ESP_LOGW(TAG, "AllowSendPrompt task already running, skip");
-                            return;
+                    // 如果有有效的实例就拦截这条路
+                    if (HaveValidThaloraInstance()) {
+                        if (GetDeviceState() == kDeviceStateSpeaking) {
+                            SetDeviceState(kDeviceStateIdle);
+                            if (allow_send_prompt_task_handle_ != nullptr) {
+                                ESP_LOGW(TAG, "AllowSendPrompt task already running, skip");
+                                return;
+                            }
+                            BaseType_t ret = xTaskCreate([](void* arg) {
+                                Application* app = static_cast<Application*>(arg);
+                                esp_err_t err = app->AllowSendPrompt();
+                                app->Schedule([app, err]() {
+                                    app->allow_send_prompt_task_handle_ = nullptr;
+                                    if (app->GetDeviceState() != kDeviceStateIdle) {
+                                        return;
+                                    }
+                                    if (err != ESP_OK) {
+                                        ESP_LOGW(TAG, "AllowSendPrompt failed: %s", esp_err_to_name(err));
+                                        return;
+                                    }
+                                    if (app->listening_mode_ != kListeningModeManualStop) {
+                                        ESP_LOGI(TAG, "AllowSendPrompt succeeded, re-enter listening state");
+                                        if (!app->protocol_) {
+                                            ESP_LOGW(TAG, "Protocol not initialized, cannot re-enter listening state");
+                                            return;
+                                        }
+                                        auto mode = app->listening_mode_;
+                                        if (!app->protocol_->IsAudioChannelOpened()) {
+                                            app->SetDeviceState(kDeviceStateConnecting);
+                                            app->Schedule([app, mode]() {
+                                                app->ContinueOpenAudioChannel(mode);
+                                            });
+                                            return;
+                                        }
+                                        app->SetDeviceState(kDeviceStateListening);
+                                    }
+                                });
+                                vTaskDelete(nullptr);
+                            }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
+                            if (ret != pdPASS) {
+                                allow_send_prompt_task_handle_ = nullptr;
+                                ESP_LOGE(TAG, "Failed to create AllowSendPrompt task");
+                            }
                         }
-                        BaseType_t ret = xTaskCreate([](void* arg) {
-                            Application* app = static_cast<Application*>(arg);
-                            esp_err_t err = app->AllowSendPrompt();
-                            app->Schedule([app, err]() {
-                                app->allow_send_prompt_task_handle_ = nullptr;
-                                if (app->GetDeviceState() != kDeviceStateIdle) {
-                                    return;
-                                }
-                                if (err != ESP_OK) {
-                                    ESP_LOGW(TAG, "AllowSendPrompt failed: %s", esp_err_to_name(err));
-                                    return;
-                                }
-                                if (app->listening_mode_ != kListeningModeManualStop) {
-                                    ESP_LOGI(TAG, "AllowSendPrompt succeeded, re-enter listening state");
-                                    app->SetDeviceState(kDeviceStateListening);
-                                }
-                            });
-                            vTaskDelete(nullptr);
-                        }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
-                        if (ret != pdPASS) {
-                            allow_send_prompt_task_handle_ = nullptr;
-                            ESP_LOGE(TAG, "Failed to create AllowSendPrompt task");
+                    }
+                    // 原来的路径
+                    else {
+                        if (listening_mode_ == kListeningModeManualStop) {
+                            SetDeviceState(kDeviceStateIdle);
+                        } else {
+                            SetDeviceState(kDeviceStateListening);
                         }
                     }
                 });
@@ -1146,11 +1174,100 @@ void Application::ResetProtocol() {
     });
 }
 
+void Application::AutoStartThalora() {
+    ESP_LOGI(TAG, "Auto starting Thalora...");
+    auto& board = Board::GetInstance();
+    auto network = board.GetNetwork();
+    auto http = network->CreateHttp(1);
+    http->SetContent(std::string{});
+
+    // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/auto-start/" + SystemInfo::GetMacAddress())) {
+    if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/auto-start/" + SystemInfo::GetMacAddress())) {
+        ESP_LOGE(TAG, "Failed to open allow prompt URL");
+        return;
+    }
+
+    auto status_code = http->GetStatusCode();
+    std::string response_body = http->ReadAll();
+
+    http->Close();
+
+    // HTTP 层失败
+    if (status_code != 200) {
+        ESP_LOGE(TAG, "HTTP failed, code=%d body=%s", status_code, response_body.c_str());
+        return;
+    }
+
+    // 解析 JSON
+    cJSON* root = cJSON_Parse(response_body.c_str());
+    if (!root) {
+        ESP_LOGE(TAG, "AllowSendPrompt JSON parse failed");
+        return;
+    }
+
+    cJSON* code_item = cJSON_GetObjectItem(root, "code");
+    cJSON* msg_item  = cJSON_GetObjectItem(root, "msg");
+
+    int biz_code = -1;
+    const char* biz_msg = "";
+    if (cJSON_IsNumber(code_item)) {
+        biz_code = code_item->valueint;
+    }
+
+    if (cJSON_IsString(msg_item)) {
+        biz_msg = msg_item->valuestring;
+    }
+
+    switch (biz_code) {
+        // 自动启动导播成功
+        case 201: {
+            haveValidThaloraInstance_.store(true);
+            if (GetDeviceState() == kDeviceStateIdle) {
+                ToggleChatState();
+            }
+            // 201之后对端会直接发一轮输入, 所以这边不用主动AllowSendPrompt
+            break;
+        }
+        // 已有正在运行的实例了
+        case 200: {
+            haveValidThaloraInstance_.store(true);
+            xTaskCreate([](void* arg) {
+                vTaskDelay(pdMS_TO_TICKS(1000));
+                Application* app = static_cast<Application*>(arg);
+                if (app->GetDeviceState() == kDeviceStateIdle) {
+                    app->ToggleChatState();
+                }
+                // 这要等一下, 不然没声音
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                app->AllowSendPrompt();
+                vTaskDelete(nullptr);
+            }, "allow_prompt", 4096, this, 5, nullptr);
+            break;
+        }
+        // 此设备未设置自动启动方案, 保持最原始的待机状态
+        case 404:
+            break;
+        // 也许是业务错误
+        case 409: {
+            auto display = Board::GetInstance().GetDisplay();
+            display->SetChatMessage("system", biz_msg);
+            break;
+        }
+        // 实例启动失败
+        case 502:
+            break;
+    }
+    
+    ESP_LOGW(TAG, "AutoStartThalora: biz_code=%d msg=%s", biz_code, biz_msg);
+    cJSON_Delete(root);
+    return;
+}
+
 esp_err_t Application::AllowSendPrompt() {
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(1);
-    http->SetHeader("Content-Length", "0");
+    http->SetContent(std::string{});
 
     // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
     if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
@@ -1160,15 +1277,48 @@ esp_err_t Application::AllowSendPrompt() {
 
     auto status_code = http->GetStatusCode();
     std::string response_body = http->ReadAll();
-    if (status_code == 202) {
-        http->Close();
-        return ESP_ERR_TIMEOUT;
-    }
+
+    http->Close();
+
+    // HTTP 层失败
     if (status_code != 200) {
-        ESP_LOGE(TAG, "Failed to activate, code: %d, body: %s", status_code, response_body.c_str());
-        http->Close();
+        ESP_LOGE(TAG, "HTTP failed, code=%d body=%s", status_code, response_body.c_str());
         return ESP_FAIL;
     }
-    http->Close();
-    return ESP_OK;
+
+    // 解析 JSON
+    cJSON* root = cJSON_Parse(response_body.c_str());
+    if (!root) {
+        ESP_LOGE(TAG, "AllowSendPrompt JSON parse failed");
+        return ESP_FAIL;
+    }
+
+    cJSON* code_item = cJSON_GetObjectItem(root, "code");
+    cJSON* msg_item  = cJSON_GetObjectItem(root, "msg");
+
+    int biz_code = -1;
+    const char* biz_msg = "";
+    if (cJSON_IsNumber(code_item)) {
+        biz_code = code_item->valueint;
+    }
+
+    if (cJSON_IsString(msg_item)) {
+        biz_msg = msg_item->valuestring;
+    }
+
+    // 唯一成功, 继续下一轮输入
+    if (biz_code == 0) {
+        haveValidThaloraInstance_.store(true);
+        cJSON_Delete(root);
+        return ESP_OK;
+    }
+    
+    ESP_LOGW(TAG, "AllowSendPrompt: biz_code=%d msg=%s", biz_code, biz_msg);
+
+    auto display = Board::GetInstance().GetDisplay();
+    display->SetChatMessage("system", biz_msg);
+    cJSON_Delete(root);
+    haveValidThaloraInstance_.store(false);
+
+    return ESP_FAIL;
 }
