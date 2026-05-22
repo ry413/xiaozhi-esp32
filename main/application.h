@@ -103,6 +103,7 @@ public:
      * Sends MAIN_EVENT_STOP_LISTENING to be handled in Run()
      */
     void StopListening();
+    void ReconnectAudioChannel();
 
     void Reboot();
     void WakeWordInvoke(const std::string& wake_word);
@@ -149,6 +150,7 @@ private:
     TaskHandle_t activation_task_handle_ = nullptr;
     TaskHandle_t allow_send_prompt_task_handle_ = nullptr;
     std::atomic<bool> haveValidThaloraInstance_{false};
+    std::atomic<bool> reconnecting_audio_channel_{false};
 
 
     // Event handlers

@@ -517,7 +517,11 @@ void Application::InitializeProtocol() {
     
     protocol_->OnAudioChannelClosed([this, &board]() {
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);
-        Schedule([this]() {
+        bool reconnecting = reconnecting_audio_channel_.exchange(false);
+        Schedule([this, reconnecting]() {
+            if (reconnecting) {
+                return;
+            }
             auto display = Board::GetInstance().GetDisplay();
             display->SetChatMessage("system", "");
             SetDeviceState(kDeviceStateIdle);
@@ -721,6 +725,40 @@ void Application::StartListening() {
 
 void Application::StopListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
+}
+
+void Application::ReconnectAudioChannel() {
+    Schedule([this]() {
+        if (!protocol_) {
+            ESP_LOGW(TAG, "Protocol not initialized, cannot reconnect audio channel");
+            return;
+        }
+
+        auto state = GetDeviceState();
+        if (state == kDeviceStateStarting || state == kDeviceStateActivating ||
+            state == kDeviceStateWifiConfiguring || state == kDeviceStateAudioTesting ||
+            state == kDeviceStateUpgrading) {
+            ESP_LOGW(TAG, "Cannot reconnect audio channel in state: %d", static_cast<int>(state));
+            return;
+        }
+
+        auto mode = listening_mode_;
+        if (state == kDeviceStateIdle) {
+            mode = GetDefaultListeningMode();
+        } else if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+
+        if (protocol_->IsAudioChannelOpened()) {
+            reconnecting_audio_channel_.store(true);
+            protocol_->CloseAudioChannel();
+        }
+
+        SetDeviceState(kDeviceStateConnecting);
+        Schedule([this, mode]() {
+            ContinueOpenAudioChannel(mode);
+        });
+    });
 }
 
 void Application::HandleToggleChatEvent() {

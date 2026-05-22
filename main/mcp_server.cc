@@ -231,6 +231,15 @@ void McpServer::AddUserOnlyTools() {
             return true;
     });
 
+    AddUserOnlyTool("self.reconnect_audio_channel",
+        "Reconnect the current audio channel by closing it if needed, then opening it again and returning to listening state.",
+        PropertyList(),
+        [this](const PropertyList& properties) -> ReturnValue {
+            auto& app = Application::GetInstance();
+            app.ReconnectAudioChannel();
+            return true;
+    });
+
     // Display control
 #ifdef HAVE_LVGL
     auto display = dynamic_cast<LvglDisplay*>(Board::GetInstance().GetDisplay());
