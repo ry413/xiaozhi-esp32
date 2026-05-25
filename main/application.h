@@ -124,7 +124,7 @@ public:
     void ResetProtocol();
     esp_err_t AllowSendPrompt();
     void AutoStartThalora();
-    bool HaveValidThaloraInstance() const { return haveValidThaloraInstance_.load(); }
+    std::atomic<bool> haveValidThaloraInstance_{false};
 
 private:
     Application();
@@ -149,7 +149,6 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
     TaskHandle_t allow_send_prompt_task_handle_ = nullptr;
-    std::atomic<bool> haveValidThaloraInstance_{false};
     std::atomic<bool> reconnecting_audio_channel_{false};
 
 

@@ -541,7 +541,7 @@ void Application::InitializeProtocol() {
             } else if (strcmp(state->valuestring, "stop") == 0) {
                 Schedule([this]() {
                     // 如果有有效的实例就拦截这条路
-                    if (HaveValidThaloraInstance()) {
+                    if (haveValidThaloraInstance_.load()) {
                         if (GetDeviceState() == kDeviceStateSpeaking) {
                             SetDeviceState(kDeviceStateIdle);
                             if (allow_send_prompt_task_handle_ != nullptr) {
