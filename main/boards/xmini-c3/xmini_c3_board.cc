@@ -120,7 +120,6 @@ private:
             }
             if (!press_to_talk_tool_ || !press_to_talk_tool_->IsPressToTalkEnabled()) {
                 app.ToggleChatState();
-                app.AllowSendPrompt();
             }
         });
         boot_button_.OnPressDown([this]() {
@@ -141,6 +140,28 @@ private:
     void InitializeTools() {
         press_to_talk_tool_ = new PressToTalkMcpTool();
         press_to_talk_tool_->Initialize();
+
+        auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddUserOnlyTool("self.audio_speaker.set_gain", 
+            "设置麦克风输入增益，范围0-100",
+            PropertyList({
+                Property("gain", kPropertyTypeInteger, 0, 100)
+            }), 
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto codec = GetAudioCodec();
+                codec->SetInputGain(properties["gain"].value<int>());
+                return true;
+        });
+
+        mcp_server.AddUserOnlyTool("self.notify_thalora_instance",
+            "通知设备Thalora实例已存在",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto &app = Application::GetInstance();
+                app.haveValidThaloraInstance_.store(true);
+                return true;
+            }
+        );
     }
 
 public:
