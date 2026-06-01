@@ -177,6 +177,7 @@ private:
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);
+    static std::string RemovePrefix(const std::string& input);
 };
 
 

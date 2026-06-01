@@ -608,7 +608,8 @@ void Application::InitializeProtocol() {
             if (cJSON_IsString(text)) {
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([display, message = std::string(text->valuestring)]() {
-                    display->SetChatMessage("user", message.c_str());
+                    std::string cleaned = RemovePrefix(message);
+                    display->SetChatMessage("user", cleaned.c_str());
                 });
             }
         } else if (strcmp(type->valuestring, "llm") == 0) {
@@ -1263,6 +1264,14 @@ void Application::AutoStartThalora() {
             if (GetDeviceState() == kDeviceStateIdle) {
                 ToggleChatState();
             }
+            // 关闭麦克风
+            xTaskCreate([](void* arg) {
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                Application* app = static_cast<Application*>(arg);
+                app->GetAudioService().SetMicrophoneEnabled(false);
+                vTaskDelete(nullptr);
+            }, "disable_microphone", 4096, this, 5, nullptr);
+
             // 201之后对端会直接发一轮输入, 所以这边不用主动AllowSendPrompt
             break;
         }
@@ -1278,6 +1287,10 @@ void Application::AutoStartThalora() {
                 // 这要等一下, 不然没声音
                 vTaskDelay(pdMS_TO_TICKS(2000));
                 app->AllowSendPrompt();
+
+                // 关闭麦克风
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                app->GetAudioService().SetMicrophoneEnabled(false);
                 vTaskDelete(nullptr);
             }, "allow_prompt", 4096, this, 5, nullptr);
             break;
@@ -1359,4 +1372,38 @@ esp_err_t Application::AllowSendPrompt() {
     haveValidThaloraInstance_.store(false);
 
     return ESP_FAIL;
+}
+
+std::string Application::RemovePrefix(const std::string& input) {
+    const std::string danmu_prefix = "弹幕】";
+    const std::string welcome_prefix = "进场】";
+    const std::string like_prefix = "点赞】";
+    const std::string follow_prefix = "关注】";
+    const std::string gift_prefix = "送礼】";
+    const std::string admin_prefix = "Admin】";
+
+    if (input.rfind(danmu_prefix, 0) == 0) {
+        return input.substr(danmu_prefix.size());
+    }
+
+    if (input.rfind(welcome_prefix, 0) == 0) {
+        return input.substr(welcome_prefix.size());
+    }
+
+    if (input.rfind(like_prefix, 0) == 0) {
+        return input.substr(like_prefix.size());
+    }
+
+    if (input.rfind(follow_prefix, 0) == 0) {
+        return input.substr(follow_prefix.size());
+    }
+
+    if (input.rfind(gift_prefix, 0) == 0) {
+        return input.substr(gift_prefix.size());
+    }
+
+    if (input.rfind(admin_prefix, 0) == 0) {
+        return input.substr(admin_prefix.size());
+    }
+    return input;
 }
