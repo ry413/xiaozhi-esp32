@@ -136,6 +136,17 @@ private:
     // 物联网初始化，添加对 AI 可见设备
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
+
+        auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddUserOnlyTool("self.notify_thalora_instance",
+            "通知设备Thalora实例已存在",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto &app = Application::GetInstance();
+                app.haveValidThaloraInstance_.store(true);
+                return true;
+            }
+        );
     }
 
 public:

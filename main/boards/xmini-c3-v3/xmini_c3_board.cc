@@ -155,6 +155,17 @@ private:
     void InitializeTools() {
         press_to_talk_tool_ = new PressToTalkMcpTool();
         press_to_talk_tool_->Initialize();
+
+        auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddUserOnlyTool("self.notify_thalora_instance",
+            "通知设备Thalora实例已存在",
+            PropertyList(),
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto &app = Application::GetInstance();
+                app.haveValidThaloraInstance_.store(true);
+                return true;
+            }
+        );
     }
 
 public:
