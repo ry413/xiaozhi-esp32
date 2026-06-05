@@ -190,6 +190,19 @@ private:
     void InitializeTools() {
         press_to_talk_tool_ = new PressToTalkMcpTool();
         press_to_talk_tool_->Initialize();
+        
+        auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool("self.audio_speaker.set_gain", 
+            "设置麦克风输入增益(灵敏度)，范围0-100",
+            PropertyList({
+                Property("gain", kPropertyTypeInteger, 0, 100)
+            }), 
+            [this](const PropertyList& properties) -> ReturnValue {
+                auto codec = GetAudioCodec();
+                codec->SetInputGain(properties["gain"].value<int>());
+                return true;
+        });
+
     }
 
 public:
