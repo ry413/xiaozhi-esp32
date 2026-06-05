@@ -512,6 +512,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_XIAOZHU3
         bool "xiaozhu3"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_TOY_AI_CORE_C3_1_28
+        bool "Toy-AI-Core-C3-1.28"
+        depends on IDF_TARGET_ESP32C3
 endchoice
 
 choice
