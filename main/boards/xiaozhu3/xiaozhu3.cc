@@ -163,10 +163,10 @@ private:
 
     void InitializeTools() {
         auto &mcp_server = McpServer::GetInstance();
-        mcp_server.AddUserOnlyTool("self.audio_speaker.set_gain", 
-            "设置麦克风输入增益，范围0-100",
+        mcp_server.AddTool("self.audio_speaker.set_gain", 
+            "设置麦克风输入增益，范围0-10",
             PropertyList({
-                Property("gain", kPropertyTypeInteger, 0, 100)
+                Property("gain", kPropertyTypeInteger, 0, 10)
             }), 
             [this](const PropertyList& properties) -> ReturnValue {
                 auto codec = GetAudioCodec();
