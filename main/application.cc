@@ -9,6 +9,7 @@
 #include "mcp_server.h"
 #include "assets.h"
 #include "settings.h"
+#include "sip_phone.h"
 
 #include <cstring>
 #include <esp_log.h>
@@ -317,6 +318,77 @@ void Application::HandleActivationDoneEvent() {
     Schedule([this]() {
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::OGG_SUCCESS);
+    });
+
+    StartSipPhone();
+}
+
+void Application::StartSipPhone() {
+    if (sip_phone_ == nullptr) {
+        sip_phone_ = std::make_unique<SipPhone>();
+        sip_phone_->SetAudioSessionCallbacks(
+            [this]() { EnterSipAudioSession(); },
+            [this]() { ExitSipAudioSession(); });
+    }
+    sip_phone_->Start();
+}
+
+void Application::SipCall(const std::string& remote_user) {
+    Schedule([this, remote_user]() {
+        if (sip_phone_ == nullptr) {
+            StartSipPhone();
+        }
+        sip_phone_->Call(remote_user);
+    });
+}
+
+void Application::SipAnswer() {
+    Schedule([this]() {
+        if (sip_phone_ == nullptr) {
+            StartSipPhone();
+        }
+        sip_phone_->Answer();
+    });
+}
+
+void Application::EnterSipAudioSession() {
+    Schedule([this]() {
+        ESP_LOGI(TAG, "Enter SIP audio session");
+        sip_call_active_ = true;
+        audio_service_.SetExternalAudioActive(true);
+
+        auto state = GetDeviceState();
+        if (state == kDeviceStateSpeaking) {
+            AbortSpeaking(kAbortReasonNone);
+        }
+        if (state == kDeviceStateListening && protocol_) {
+            protocol_->SendStopListening();
+        }
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->CloseAudioChannel();
+        }
+
+        while (audio_service_.PopPacketFromSendQueue());
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.EnableWakeWordDetection(false);
+        audio_service_.ResetDecoder();
+        SetDeviceState(kDeviceStateIdle);
+    });
+}
+
+void Application::ExitSipAudioSession() {
+    Schedule([this]() {
+        ESP_LOGI(TAG, "Exit SIP audio session");
+        sip_call_active_ = false;
+        audio_service_.SetExternalAudioActive(false);
+        audio_service_.EnableVoiceProcessing(false);
+        audio_service_.ResetDecoder();
+        audio_service_.EnableWakeWordDetection(false);
+        if (GetDeviceState() == kDeviceStateIdle) {
+            audio_service_.EnableWakeWordDetection(true);
+        } else {
+            SetDeviceState(kDeviceStateIdle);
+        }
     });
 }
 
@@ -865,7 +937,7 @@ void Application::HandleStateChangedEvent() {
             display->ClearChatMessages();  // Clear messages first
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
-            audio_service_.EnableWakeWordDetection(true);
+            audio_service_.EnableWakeWordDetection(!sip_call_active_);
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -1113,4 +1185,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-

@@ -626,6 +626,14 @@ void AudioService::EnableDeviceAec(bool enable) {
     audio_processor_->EnableDeviceAec(enable);
 }
 
+void AudioService::SetExternalAudioActive(bool active) {
+    external_audio_active_ = active;
+    if (active) {
+        esp_timer_stop(audio_power_timer_);
+        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+    }
+}
+
 void AudioService::SetCallbacks(AudioServiceCallbacks& callbacks) {
     callbacks_ = callbacks;
 }
@@ -680,6 +688,10 @@ void AudioService::ResetDecoder() {
 }
 
 void AudioService::CheckAndUpdateAudioPowerState() {
+    if (external_audio_active_) {
+        return;
+    }
+
     auto now = std::chrono::steady_clock::now();
     auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
     auto output_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_output_time_).count();
