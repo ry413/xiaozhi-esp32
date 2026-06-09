@@ -113,8 +113,10 @@ private:
 
         volume_up_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-            GetAudioCodec()->SetOutputVolume(100);
-            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+            // GetAudioCodec()->SetOutputVolume(100);
+            // GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+
+            Application::GetInstance().SipCall("9000");
         });
 
         volume_down_button_.OnClick([this]() {
@@ -130,8 +132,10 @@ private:
 
         volume_down_button_.OnLongPress([this]() {
             power_save_timer_->WakeUp();
-            GetAudioCodec()->SetOutputVolume(0);
-            GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+            // GetAudioCodec()->SetOutputVolume(0);
+            // GetDisplay()->ShowNotification(Lang::Strings::MUTED);
+
+            Application::GetInstance().SipAnswer();
         });
     }
 

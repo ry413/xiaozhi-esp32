@@ -16,6 +16,7 @@
 #include "esp32_camera.h"
 #include "power_manager.h"
 #include "power_save_timer.h"
+#include "mcp_server.h"
 
 #define TAG "esp32s3_korvo2_v3"
 /* ADC Buttons */
@@ -245,17 +246,22 @@ private:
 
         auto play_button = adc_button_[BSP_ADC_BUTTON_PLAY];
         play_button->OnClick([this]() {
-             ESP_LOGI(TAG, " TODO %s:%d\n", __func__, __LINE__);
+            Application::GetInstance().SipCall("6002");
         });
 
         auto set_button = adc_button_[BSP_ADC_BUTTON_SET];
         set_button->OnClick([this]() {
-            EnterWifiConfigMode();
+            // EnterWifiConfigMode();
+            auto& app = Application::GetInstance();
+            if (app.GetDeviceState() == kDeviceStateIdle) {
+                app.SetAecMode(app.GetAecMode() == kAecOff ? kAecOnDeviceSide : kAecOff);
+                ESP_LOGI(TAG, "AEC mode changed to %s", app.GetAecMode() == kAecOff ? "Off" : "On");
+            }
         });
 
         auto rec_button = adc_button_[BSP_ADC_BUTTON_REC];
         rec_button->OnClick([this]() {
-             Application::GetInstance().ToggleChatState();
+            Application::GetInstance().SipAnswer();
         });
         boot_button_.OnClick([this]() {});
         boot_button_.OnClick([this]() {
@@ -389,7 +395,13 @@ private:
             camera_->SetVFlip(true);
         }
     }
-
+    void InitializeTools() {
+        auto &mcp_server = McpServer::GetInstance();
+        mcp_server.AddTool("self.call_6002", "呼叫6002", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+            Application::GetInstance().SipCall("6002");
+            return true;
+        });
+    }
 public:
     Esp32S3Korvo2V3Board() : boot_button_(BOOT_BUTTON_GPIO) {
         ESP_LOGI(TAG, "Initializing esp32s3_korvo2_v3 Board");
@@ -406,6 +418,7 @@ public:
         #else
         InitializeSt7789Display(); 
         #endif
+        InitializeTools();
     }
 
     virtual AudioCodec* GetAudioCodec() override {
