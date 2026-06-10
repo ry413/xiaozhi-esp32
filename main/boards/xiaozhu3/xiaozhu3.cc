@@ -197,6 +197,11 @@ private:
                 ESP_LOGI(TAG, "Cleared all WiFi credentials");
                 return true;
         });
+
+        mcp_server.AddTool("self.call_9000", "呼叫9000", PropertyList(), [this](const PropertyList& properties) -> ReturnValue {
+            Application::GetInstance().SipCall("9000");
+            return true;
+        });
     }
 
 public:
