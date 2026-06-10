@@ -29,9 +29,14 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
 void AudioCodec::Start() {
     Settings settings("audio", false);
     output_volume_ = settings.GetInt("output_volume", output_volume_);
+    input_gain_ = settings.GetInt("input_gain", input_gain_);
     if (output_volume_ <= 0) {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
+    }
+    if (input_gain_ <= 0) {
+        ESP_LOGW(TAG, "Input gain value (%d) is too small, setting to default (0)", static_cast<int>(input_gain_));
+        input_gain_ = 0;
     }
 
     ESP_LOGI(TAG, "Audio codec started");
@@ -48,6 +53,9 @@ void AudioCodec::SetOutputVolume(int volume) {
 void AudioCodec::SetInputGain(float gain) {
     input_gain_ = gain;
     ESP_LOGI(TAG, "Set input gain to %.1f", input_gain_);
+
+    Settings settings("audio", true);
+    settings.SetInt("input_gain", static_cast<int>(input_gain_));
 }
 
 void AudioCodec::EnableInput(bool enable) {
