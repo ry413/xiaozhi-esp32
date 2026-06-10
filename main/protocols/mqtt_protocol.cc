@@ -12,6 +12,7 @@
 
 MqttProtocol::MqttProtocol() {
     event_group_handle_ = xEventGroupCreate();
+    mbedtls_aes_init(&aes_ctx_);
 
     // Initialize reconnect timer
     esp_timer_create_args_t reconnect_timer_args = {
@@ -31,6 +32,19 @@ MqttProtocol::MqttProtocol() {
         .arg = this,
     };
     esp_timer_create(&reconnect_timer_args, &reconnect_timer_);
+
+    esp_timer_create_args_t audio_probe_timer_args = {
+        .callback = [](void* arg) {
+            MqttProtocol* protocol = (MqttProtocol*)arg;
+            std::lock_guard<std::mutex> lock(protocol->channel_mutex_);
+            protocol->SendUdpAudioProbeLocked();
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "udp_audio_probe",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&audio_probe_timer_args, &audio_probe_timer_);
 }
 
 MqttProtocol::~MqttProtocol() {
@@ -43,9 +57,14 @@ MqttProtocol::~MqttProtocol() {
         esp_timer_stop(reconnect_timer_);
         esp_timer_delete(reconnect_timer_);
     }
+    if (audio_probe_timer_ != nullptr) {
+        esp_timer_stop(audio_probe_timer_);
+        esp_timer_delete(audio_probe_timer_);
+    }
 
     udp_.reset();
     mqtt_.reset();
+    mbedtls_aes_free(&aes_ctx_);
     
     if (event_group_handle_ != nullptr) {
         vEventGroupDelete(event_group_handle_);
@@ -117,11 +136,17 @@ bool MqttProtocol::StartMqttClient(bool report_error) {
             auto session_id = cJSON_GetObjectItem(root, "session_id");
             ESP_LOGI(TAG, "Received goodbye message, session_id: %s", session_id ? session_id->valuestring : "null");
             if (session_id == nullptr || session_id_ == session_id->valuestring) {
+                std::string goodbye_session_id;
+                if (cJSON_IsString(session_id)) {
+                    goodbye_session_id = session_id->valuestring;
+                }
                 auto alive = alive_;  // Capture alive flag
-                Application::GetInstance().Schedule([this, alive]() {
-                    if (*alive) {
+                Application::GetInstance().Schedule([this, alive, goodbye_session_id]() {
+                    if (*alive && (goodbye_session_id.empty() || session_id_ == goodbye_session_id)) {
                         // Server initiated goodbye, don't send goodbye back to avoid ping-pong
                         CloseAudioChannel(false);
+                    } else if (*alive) {
+                        ESP_LOGI(TAG, "Ignore stale goodbye for session_id: %s", goodbye_session_id.c_str());
                     }
                 });
             }
@@ -191,6 +216,10 @@ bool MqttProtocol::SendAudio(std::unique_ptr<AudioStreamPacket> packet) {
 }
 
 void MqttProtocol::CloseAudioChannel(bool send_goodbye) {
+    if (audio_probe_timer_ != nullptr) {
+        esp_timer_stop(audio_probe_timer_);
+    }
+
     {
         std::lock_guard<std::mutex> lock(channel_mutex_);
         udp_.reset();
@@ -289,10 +318,31 @@ bool MqttProtocol::OpenAudioChannel() {
 
     udp_->Connect(udp_server_, udp_port_);
 
+    SendUdpAudioProbeLocked();
+    if (audio_probe_timer_ != nullptr) {
+        esp_timer_stop(audio_probe_timer_);
+        esp_timer_start_periodic(audio_probe_timer_, 30000 * 1000);
+    }
+
     if (on_audio_channel_opened_ != nullptr) {
         on_audio_channel_opened_();
     }
     return true;
+}
+
+void MqttProtocol::SendUdpAudioProbeLocked() {
+    if (udp_ == nullptr) {
+        return;
+    }
+
+    std::string probe(aes_nonce_);
+    *(uint16_t*)&probe[2] = htons(0);
+    *(uint32_t*)&probe[8] = htonl(0);
+    *(uint32_t*)&probe[12] = htonl(++local_sequence_);
+    int probe_ret = udp_->Send(probe);
+    if (probe_ret <= 0) {
+        ESP_LOGW(TAG, "Failed to send UDP audio probe, ret: %d", probe_ret);
+    }
 }
 
 std::string MqttProtocol::GetHelloMessage() {
@@ -359,8 +409,12 @@ void MqttProtocol::ParseServerHello(const cJSON* root) {
     // auto encryption = cJSON_GetObjectItem(udp, "encryption")->valuestring;
     // ESP_LOGI(TAG, "UDP server: %s, port: %d, encryption: %s", udp_server_.c_str(), udp_port_, encryption);
     aes_nonce_ = DecodeHexString(nonce);
-    mbedtls_aes_init(&aes_ctx_);
-    mbedtls_aes_setkey_enc(&aes_ctx_, (const unsigned char*)DecodeHexString(key).c_str(), 128);
+    auto decoded_key = DecodeHexString(key);
+    auto ret = mbedtls_aes_setkey_enc(&aes_ctx_, (const unsigned char*)decoded_key.c_str(), 128);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "Failed to set AES key, ret: %d", ret);
+        return;
+    }
     local_sequence_ = 0;
     remote_sequence_ = 0;
     xEventGroupSetBits(event_group_handle_, MQTT_PROTOCOL_SERVER_HELLO_EVENT);

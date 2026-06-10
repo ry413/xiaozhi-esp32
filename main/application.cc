@@ -544,45 +544,7 @@ void Application::InitializeProtocol() {
                     if (haveValidThaloraInstance_.load()) {
                         if (GetDeviceState() == kDeviceStateSpeaking) {
                             SetDeviceState(kDeviceStateIdle);
-                            if (allow_send_prompt_task_handle_ != nullptr) {
-                                ESP_LOGW(TAG, "AllowSendPrompt task already running, skip");
-                                return;
-                            }
-                            BaseType_t ret = xTaskCreate([](void* arg) {
-                                Application* app = static_cast<Application*>(arg);
-                                esp_err_t err = app->AllowSendPrompt();
-                                app->Schedule([app, err]() {
-                                    app->allow_send_prompt_task_handle_ = nullptr;
-                                    if (app->GetDeviceState() != kDeviceStateIdle) {
-                                        return;
-                                    }
-                                    if (err != ESP_OK) {
-                                        ESP_LOGW(TAG, "AllowSendPrompt failed: %s", esp_err_to_name(err));
-                                        return;
-                                    }
-                                    if (app->listening_mode_ != kListeningModeManualStop) {
-                                        ESP_LOGI(TAG, "AllowSendPrompt succeeded, re-enter listening state");
-                                        if (!app->protocol_) {
-                                            ESP_LOGW(TAG, "Protocol not initialized, cannot re-enter listening state");
-                                            return;
-                                        }
-                                        auto mode = app->listening_mode_;
-                                        if (!app->protocol_->IsAudioChannelOpened()) {
-                                            app->SetDeviceState(kDeviceStateConnecting);
-                                            app->Schedule([app, mode]() {
-                                                app->ContinueOpenAudioChannel(mode);
-                                            });
-                                            return;
-                                        }
-                                        app->SetDeviceState(kDeviceStateListening);
-                                    }
-                                });
-                                vTaskDelete(nullptr);
-                            }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
-                            if (ret != pdPASS) {
-                                allow_send_prompt_task_handle_ = nullptr;
-                                ESP_LOGE(TAG, "Failed to create AllowSendPrompt task");
-                            }
+                            StartAllowSendPromptTask("tts_stop");
                         }
                     }
                     // 原来的路径
@@ -755,6 +717,7 @@ void Application::ReconnectAudioChannel() {
             protocol_->CloseAudioChannel();
         }
 
+        SetDeviceState(kDeviceStateIdle);
         SetDeviceState(kDeviceStateConnecting);
         Schedule([this, mode]() {
             ContinueOpenAudioChannel(mode);
@@ -1261,12 +1224,12 @@ void Application::AutoStartThalora() {
         // 自动启动导播成功
         case 201: {
             haveValidThaloraInstance_.store(true);
+            StartThaloraWatchdog();
             if (GetDeviceState() == kDeviceStateIdle) {
                 ToggleChatState();
             }
             // 关闭麦克风
             xTaskCreate([](void* arg) {
-                vTaskDelay(pdMS_TO_TICKS(2000));
                 Application* app = static_cast<Application*>(arg);
                 app->GetAudioService().SetMicrophoneEnabled(false);
                 vTaskDelete(nullptr);
@@ -1278,18 +1241,16 @@ void Application::AutoStartThalora() {
         // 已有正在运行的实例了
         case 200: {
             haveValidThaloraInstance_.store(true);
+            StartThaloraWatchdog();
             xTaskCreate([](void* arg) {
                 vTaskDelay(pdMS_TO_TICKS(1000));
                 Application* app = static_cast<Application*>(arg);
                 if (app->GetDeviceState() == kDeviceStateIdle) {
                     app->ToggleChatState();
                 }
-                // 这要等一下, 不然没声音
-                vTaskDelay(pdMS_TO_TICKS(2000));
                 app->AllowSendPrompt();
 
                 // 关闭麦克风
-                vTaskDelay(pdMS_TO_TICKS(2000));
                 app->GetAudioService().SetMicrophoneEnabled(false);
                 vTaskDelete(nullptr);
             }, "allow_prompt", 4096, this, 5, nullptr);
@@ -1314,7 +1275,130 @@ void Application::AutoStartThalora() {
     return;
 }
 
+void Application::StartAllowSendPromptTask(const char* reason) {
+    if (allow_send_prompt_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "AllowSendPrompt task already running, skip reason=%s", reason);
+        return;
+    }
+
+    BaseType_t ret = xTaskCreate([](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+        esp_err_t err = app->AllowSendPrompt();
+        app->Schedule([app, err]() {
+            app->allow_send_prompt_task_handle_ = nullptr;
+            if (app->GetDeviceState() != kDeviceStateIdle) {
+                return;
+            }
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "AllowSendPrompt failed: %s", esp_err_to_name(err));
+                return;
+            }
+            if (app->listening_mode_ != kListeningModeManualStop) {
+                ESP_LOGI(TAG, "AllowSendPrompt succeeded, re-enter listening state");
+                if (!app->protocol_) {
+                    ESP_LOGW(TAG, "Protocol not initialized, cannot re-enter listening state");
+                    return;
+                }
+                auto mode = app->listening_mode_;
+                if (!app->protocol_->IsAudioChannelOpened()) {
+                    app->SetDeviceState(kDeviceStateConnecting);
+                    app->Schedule([app, mode]() {
+                        app->ContinueOpenAudioChannel(mode);
+                    });
+                    return;
+                }
+                app->SetDeviceState(kDeviceStateListening);
+            }
+        });
+        vTaskDelete(nullptr);
+    }, "allow_prompt", 4096, this, 5, &allow_send_prompt_task_handle_);
+    if (ret != pdPASS) {
+        allow_send_prompt_task_handle_ = nullptr;
+        ESP_LOGE(TAG, "Failed to create AllowSendPrompt task, reason=%s", reason);
+    }
+}
+
+void Application::StartThaloraWatchdog() {
+    if (thalora_watchdog_task_handle_ != nullptr) {
+        return;
+    }
+
+    last_allow_send_prompt_time_us_.store(esp_timer_get_time());
+    BaseType_t ret = xTaskCreate([](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+        while (true) {
+            vTaskDelay(pdMS_TO_TICKS(10000));
+            if (!app->haveValidThaloraInstance_.load()) {
+                continue;
+            }
+
+            int64_t last_time = app->last_allow_send_prompt_time_us_.load();
+            int64_t now = esp_timer_get_time();
+            if (last_time == 0 || now - last_time < 60LL * 1000 * 1000) {
+                continue;
+            }
+
+            ESP_LOGW(TAG, "Thalora watchdog: no AllowSendPrompt for %lld seconds, recover loop",
+                (long long)((now - last_time) / 1000000));
+            app->last_allow_send_prompt_time_us_.store(now);
+            app->Schedule([app]() {
+                if (app->haveValidThaloraInstance_.load()) {
+                    app->StartThaloraRecoveryTask("watchdog");
+                }
+            });
+        }
+    }, "thalora_watchdog", 4096, this, 4, &thalora_watchdog_task_handle_);
+    if (ret != pdPASS) {
+        thalora_watchdog_task_handle_ = nullptr;
+        ESP_LOGE(TAG, "Failed to create Thalora watchdog task");
+    }
+}
+
+void Application::StartThaloraRecoveryTask(const char* reason) {
+    if (thalora_recovery_task_handle_ != nullptr) {
+        ESP_LOGW(TAG, "Thalora recovery already running, skip reason=%s", reason);
+        return;
+    }
+
+    ESP_LOGW(TAG, "Starting Thalora recovery, reason=%s", reason);
+    last_allow_send_prompt_time_us_.store(esp_timer_get_time());
+    BaseType_t ret = xTaskCreate([](void* arg) {
+        Application* app = static_cast<Application*>(arg);
+
+        app->Schedule([app]() {
+            auto state = app->GetDeviceState();
+            if (state == kDeviceStateSpeaking) {
+                app->AbortSpeaking(kAbortReasonNone);
+            }
+            if (app->protocol_ && app->protocol_->IsAudioChannelOpened()) {
+                app->protocol_->CloseAudioChannel();
+            }
+            app->haveValidThaloraInstance_.store(false);
+            app->allow_send_prompt_task_handle_ = nullptr;
+
+            if (state != kDeviceStateStarting && state != kDeviceStateActivating &&
+                state != kDeviceStateWifiConfiguring && state != kDeviceStateAudioTesting &&
+                state != kDeviceStateUpgrading) {
+                app->SetDeviceState(kDeviceStateIdle);
+            }
+        });
+
+        vTaskDelay(pdMS_TO_TICKS(3000));
+        app->AutoStartThalora();
+        app->Schedule([app]() {
+            app->thalora_recovery_task_handle_ = nullptr;
+        });
+        vTaskDelete(nullptr);
+    }, "thalora_recover", 4096, this, 5, &thalora_recovery_task_handle_);
+    if (ret != pdPASS) {
+        thalora_recovery_task_handle_ = nullptr;
+        ESP_LOGE(TAG, "Failed to create Thalora recovery task, reason=%s", reason);
+    }
+}
+
 esp_err_t Application::AllowSendPrompt() {
+    last_allow_send_prompt_time_us_.store(esp_timer_get_time());
+
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(1);

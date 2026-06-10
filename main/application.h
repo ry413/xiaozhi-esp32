@@ -149,6 +149,9 @@ private:
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
     TaskHandle_t allow_send_prompt_task_handle_ = nullptr;
+    TaskHandle_t thalora_watchdog_task_handle_ = nullptr;
+    TaskHandle_t thalora_recovery_task_handle_ = nullptr;
+    std::atomic<int64_t> last_allow_send_prompt_time_us_{0};
     std::atomic<bool> reconnecting_audio_channel_{false};
 
 
@@ -163,6 +166,9 @@ private:
     void HandleWakeWordDetectedEvent();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
+    void StartAllowSendPromptTask(const char* reason);
+    void StartThaloraWatchdog();
+    void StartThaloraRecoveryTask(const char* reason);
 
     // Activation task (runs in background)
     void ActivationTask();
