@@ -557,6 +557,9 @@ choice BOARD_TYPE
     config BOARD_TYPE_XIAOZHU2
         bool "xiaozhu2"
         depends on IDF_TARGET_ESP32S3
+    config BOARD_TYPE_GEZIPAI
+        bool "gezipai"
+        depends on IDF_TARGET_ESP32S3
 endchoice
 
 choice
