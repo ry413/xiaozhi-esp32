@@ -37,6 +37,29 @@
 
 #define TAG "AudioService"
 
+static std::vector<int16_t> FallbackResampleMono(const std::vector<int16_t>& input, int src_rate, int dst_rate) {
+    if (input.empty() || src_rate <= 0 || dst_rate <= 0 || src_rate == dst_rate) {
+        return input;
+    }
+
+    const size_t output_samples = (static_cast<uint64_t>(input.size()) * dst_rate + src_rate - 1) / src_rate;
+    std::vector<int16_t> output(output_samples);
+    for (size_t i = 0; i < output_samples; ++i) {
+        const uint64_t src_pos_num = static_cast<uint64_t>(i) * src_rate;
+        const size_t src_index = src_pos_num / dst_rate;
+        const uint32_t frac_num = src_pos_num % dst_rate;
+        if (src_index + 1 >= input.size()) {
+            output[i] = input.back();
+            continue;
+        }
+
+        const int32_t a = input[src_index];
+        const int32_t b = input[src_index + 1];
+        output[i] = static_cast<int16_t>(a + ((b - a) * static_cast<int32_t>(frac_num)) / dst_rate);
+    }
+    return output;
+}
+
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
 }
@@ -376,6 +399,8 @@ void AudioService::OpusCodecTask() {
                                                 (esp_ae_sample_t)resampled.data(), &actual_output);
                         resampled.resize(actual_output);
                         task->pcm = std::move(resampled);
+                    } else if (decoder_sample_rate_ == 24000 && codec_->output_sample_rate() == 16000) {
+                        task->pcm = FallbackResampleMono(task->pcm, decoder_sample_rate_, codec_->output_sample_rate());
                     }
                     lock.lock();
                     audio_playback_queue_.push_back(std::move(task));
@@ -472,11 +497,13 @@ void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
             esp_ae_rate_cvt_close(output_resampler_);
             output_resampler_ = nullptr;
         }
-        esp_ae_rate_cvt_cfg_t output_resampler_cfg = RATE_CVT_CFG(
-            decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);
-        auto resampler_ret = esp_ae_rate_cvt_open(&output_resampler_cfg, &output_resampler_);
-        if (output_resampler_ == nullptr) {
-            ESP_LOGE(TAG, "Failed to create output resampler, error code: %d", resampler_ret);
+        if (!(decoder_sample_rate_ == 24000 && codec->output_sample_rate() == 16000)) {
+            esp_ae_rate_cvt_cfg_t output_resampler_cfg = RATE_CVT_CFG(
+                decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);
+            auto resampler_ret = esp_ae_rate_cvt_open(&output_resampler_cfg, &output_resampler_);
+            if (output_resampler_ == nullptr) {
+                ESP_LOGE(TAG, "Failed to create output resampler, error code: %d", resampler_ret);
+            }
         }
     }
 }
