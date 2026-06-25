@@ -31,6 +31,7 @@
 #define MAIN_EVENT_START_LISTENING      (1 << 10)
 #define MAIN_EVENT_STOP_LISTENING       (1 << 11)
 #define MAIN_EVENT_STATE_CHANGED        (1 << 12)
+#define MAIN_EVENT_PROACTIVE_NO_INPUT_TIMEOUT (1 << 13)
 
 
 enum AecMode {
@@ -108,6 +109,9 @@ public:
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
+    void SendDirectMessageToChat(const std::string& message);
+    void OnCustomerDetected();
+    void OnCustomerGone();
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
@@ -129,6 +133,7 @@ private:
     std::unique_ptr<Protocol> protocol_;
     EventGroupHandle_t event_group_ = nullptr;
     esp_timer_handle_t clock_timer_handle_ = nullptr;
+    esp_timer_handle_t proactive_no_input_timer_handle_ = nullptr;
     DeviceStateMachine state_machine_;
     ListeningMode listening_mode_ = kListeningModeAutoStop;
     AecMode aec_mode_ = kAecOff;
@@ -140,6 +145,11 @@ private:
     bool aborted_ = false;
     bool assets_version_checked_ = false;
     bool play_popup_on_listening_ = false;  // Flag to play popup sound after state changes to listening
+    bool proactive_sales_session_active_ = false;
+    bool proactive_sales_customer_present_ = false;
+    bool proactive_sales_greeting_pending_ = false;
+    bool proactive_sales_greeting_tts_started_ = false;
+    bool proactive_sales_no_input_timer_started_ = false;
     int clock_ticks_ = 0;
     TaskHandle_t activation_task_handle_ = nullptr;
 
@@ -153,6 +163,9 @@ private:
     void HandleNetworkDisconnectedEvent();
     void HandleActivationDoneEvent();
     void HandleWakeWordDetectedEvent();
+    void HandleProactiveNoInputTimeoutEvent();
+    void HandleCustomerDetected();
+    void HandleCustomerGone();
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
 
@@ -166,6 +179,12 @@ private:
     void ShowActivationCode(const std::string& code, const std::string& message);
     void SetListeningMode(ListeningMode mode);
     ListeningMode GetDefaultListeningMode() const;
+    void SendProactiveGreeting();
+    void SendProactiveNoInputPrompt();
+    void StartProactiveNoInputTimer(bool restart = false);
+    void StopProactiveNoInputTimer();
+    void ResetProactiveSalesSession();
+    void MarkProactiveSalesUserInput();
     
     // State change handler called by state machine
     void OnStateChanged(DeviceState old_state, DeviceState new_state);

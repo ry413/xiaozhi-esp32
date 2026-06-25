@@ -73,6 +73,7 @@ public:
     virtual void SendStopListening();
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
+    virtual void SendDirectMessageToChat(const std::string& message);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;
@@ -95,4 +96,3 @@ protected:
 };
 
 #endif // PROTOCOL_H
-

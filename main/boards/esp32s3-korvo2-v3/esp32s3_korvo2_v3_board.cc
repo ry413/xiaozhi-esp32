@@ -245,7 +245,10 @@ private:
 
         auto play_button = adc_button_[BSP_ADC_BUTTON_PLAY];
         play_button->OnClick([this]() {
-             ESP_LOGI(TAG, " TODO %s:%d\n", __func__, __LINE__);
+            Application::GetInstance().OnCustomerDetected();
+        });
+        play_button->OnLongPress([this]() {
+            Application::GetInstance().OnCustomerGone();
         });
 
         auto set_button = adc_button_[BSP_ADC_BUTTON_SET];

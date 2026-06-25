@@ -18,6 +18,7 @@
 #include <font_awesome.h>
 
 #define TAG "Application"
+#define PROACTIVE_NO_INPUT_TIMEOUT_US (30LL * 1000 * 1000)
 
 
 Application::Application() {
@@ -44,12 +45,28 @@ Application::Application() {
         .skip_unhandled_events = true
     };
     esp_timer_create(&clock_timer_args, &clock_timer_handle_);
+
+    esp_timer_create_args_t proactive_no_input_timer_args = {
+        .callback = [](void* arg) {
+            Application* app = (Application*)arg;
+            xEventGroupSetBits(app->event_group_, MAIN_EVENT_PROACTIVE_NO_INPUT_TIMEOUT);
+        },
+        .arg = this,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "proactive_no_input",
+        .skip_unhandled_events = true
+    };
+    esp_timer_create(&proactive_no_input_timer_args, &proactive_no_input_timer_handle_);
 }
 
 Application::~Application() {
     if (clock_timer_handle_ != nullptr) {
         esp_timer_stop(clock_timer_handle_);
         esp_timer_delete(clock_timer_handle_);
+    }
+    if (proactive_no_input_timer_handle_ != nullptr) {
+        esp_timer_stop(proactive_no_input_timer_handle_);
+        esp_timer_delete(proactive_no_input_timer_handle_);
     }
     vEventGroupDelete(event_group_);
 }
@@ -179,7 +196,8 @@ void Application::Run() {
         MAIN_EVENT_START_LISTENING |
         MAIN_EVENT_STOP_LISTENING |
         MAIN_EVENT_ACTIVATION_DONE |
-        MAIN_EVENT_STATE_CHANGED;
+        MAIN_EVENT_STATE_CHANGED |
+        MAIN_EVENT_PROACTIVE_NO_INPUT_TIMEOUT;
 
     while (true) {
         auto bits = xEventGroupWaitBits(event_group_, ALL_EVENTS, pdTRUE, pdFALSE, portMAX_DELAY);
@@ -215,6 +233,10 @@ void Application::Run() {
 
         if (bits & MAIN_EVENT_STOP_LISTENING) {
             HandleStopListeningEvent();
+        }
+
+        if (bits & MAIN_EVENT_PROACTIVE_NO_INPUT_TIMEOUT) {
+            HandleProactiveNoInputTimeoutEvent();
         }
 
         if (bits & MAIN_EVENT_SEND_AUDIO) {
@@ -550,6 +572,7 @@ void Application::InitializeProtocol() {
         } else if (strcmp(type->valuestring, "stt") == 0) {
             auto text = cJSON_GetObjectItem(root, "text");
             if (cJSON_IsString(text)) {
+                MarkProactiveSalesUserInput();
                 ESP_LOGI(TAG, ">> %s", text->valuestring);
                 Schedule([display, message = std::string(text->valuestring)]() {
                     display->SetChatMessage("user", message.c_str());
@@ -669,6 +692,63 @@ void Application::StartListening() {
 
 void Application::StopListening() {
     xEventGroupSetBits(event_group_, MAIN_EVENT_STOP_LISTENING);
+}
+
+void Application::OnCustomerDetected() {
+    Schedule([this]() {
+        HandleCustomerDetected();
+    });
+}
+
+void Application::OnCustomerGone() {
+    Schedule([this]() {
+        HandleCustomerGone();
+    });
+}
+
+void Application::HandleCustomerDetected() {
+    proactive_sales_customer_present_ = true;
+
+    if (proactive_sales_session_active_) {
+        ESP_LOGI(TAG, "Customer still present");
+        return;
+    }
+
+    if (GetDeviceState() != kDeviceStateIdle) {
+        ESP_LOGI(TAG, "Customer detected while device is busy, state=%d", (int)GetDeviceState());
+        return;
+    }
+
+    if (!protocol_) {
+        ESP_LOGE(TAG, "Protocol not initialized");
+        return;
+    }
+
+    proactive_sales_session_active_ = true;
+    proactive_sales_greeting_pending_ = true;
+    proactive_sales_greeting_tts_started_ = false;
+    proactive_sales_no_input_timer_started_ = false;
+
+    ListeningMode mode = GetDefaultListeningMode();
+    if (!protocol_->IsAudioChannelOpened()) {
+        SetDeviceState(kDeviceStateConnecting);
+        Schedule([this, mode]() {
+            ContinueOpenAudioChannel(mode);
+        });
+        return;
+    }
+
+    SetListeningMode(mode);
+}
+
+void Application::HandleCustomerGone() {
+    if (!proactive_sales_session_active_) {
+        proactive_sales_customer_present_ = false;
+        return;
+    }
+
+    ESP_LOGI(TAG, "Customer gone, waiting for no-input timeout before closing session");
+    proactive_sales_customer_present_ = false;
 }
 
 void Application::HandleToggleChatEvent() {
@@ -819,6 +899,40 @@ void Application::HandleWakeWordDetectedEvent() {
     }
 }
 
+void Application::HandleProactiveNoInputTimeoutEvent() {
+    proactive_sales_no_input_timer_started_ = false;
+
+    if (!proactive_sales_session_active_) {
+        return;
+    }
+
+    auto state = GetDeviceState();
+    ESP_LOGI(TAG, "Proactive no-input timeout, state=%d, present=%d",
+        (int)state, proactive_sales_customer_present_ ? 1 : 0);
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        ResetProactiveSalesSession();
+        return;
+    }
+
+    if (state == kDeviceStateSpeaking || state == kDeviceStateConnecting) {
+        StartProactiveNoInputTimer();
+        return;
+    }
+
+    if (state != kDeviceStateListening) {
+        return;
+    }
+
+    if (proactive_sales_customer_present_) {
+        SendProactiveNoInputPrompt();
+        StartProactiveNoInputTimer();
+        return;
+    }
+
+    ESP_LOGI(TAG, "No customer present after no-input timeout, closing proactive session");
+    protocol_->CloseAudioChannel();
+}
+
 void Application::ContinueWakeWordInvoke(const std::string& wake_word) {
     // Check state again in case it was changed during scheduling
     if (GetDeviceState() != kDeviceStateConnecting) {
@@ -866,6 +980,7 @@ void Application::HandleStateChangedEvent() {
             display->SetEmotion("neutral"); // Then set emotion (wechat mode checks child count)
             audio_service_.EnableVoiceProcessing(false);
             audio_service_.EnableWakeWordDetection(true);
+            ResetProactiveSalesSession();
             break;
         case kDeviceStateConnecting:
             display->SetStatus(Lang::Strings::CONNECTING);
@@ -902,6 +1017,14 @@ void Application::HandleStateChangedEvent() {
                 play_popup_on_listening_ = false;
                 audio_service_.PlaySound(Lang::Sounds::OGG_POPUP);
             }
+
+            if (proactive_sales_session_active_ && proactive_sales_greeting_pending_) {
+                SendProactiveGreeting();
+            } else if (proactive_sales_session_active_ &&
+                       !proactive_sales_greeting_pending_ &&
+                       !proactive_sales_no_input_timer_started_) {
+                StartProactiveNoInputTimer();
+            }
             break;
         case kDeviceStateSpeaking:
             display->SetStatus(Lang::Strings::SPEAKING);
@@ -912,6 +1035,9 @@ void Application::HandleStateChangedEvent() {
                 audio_service_.EnableWakeWordDetection(audio_service_.IsAfeWakeWord());
             }
             audio_service_.ResetDecoder();
+            if (proactive_sales_session_active_) {
+                proactive_sales_greeting_tts_started_ = true;
+            }
             break;
         case kDeviceStateWifiConfiguring:
             audio_service_.EnableVoiceProcessing(false);
@@ -1072,6 +1198,71 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
+void Application::SendDirectMessageToChat(const std::string& message) {
+    Schedule([this, message = std::move(message)]() {
+        if (protocol_ && protocol_->IsAudioChannelOpened()) {
+            protocol_->SendDirectMessageToChat(message);
+        }
+    });
+}
+
+void Application::SendProactiveGreeting() {
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return;
+    }
+
+    proactive_sales_greeting_pending_ = false;
+    protocol_->SendDirectMessageToChat("【系统】检测到用户");
+    StartProactiveNoInputTimer();
+}
+
+void Application::SendProactiveNoInputPrompt() {
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Send proactive no-input prompt");
+    protocol_->SendDirectMessageToChat("【系统】用户仍在红外检测范围内，但最近30秒没有检测到用户输入。请用简短自然的话继续引导用户。");
+}
+
+void Application::StartProactiveNoInputTimer(bool restart) {
+    if (!proactive_no_input_timer_handle_) {
+        return;
+    }
+
+    if (proactive_sales_no_input_timer_started_ && !restart) {
+        return;
+    }
+
+    esp_timer_stop(proactive_no_input_timer_handle_);
+    proactive_sales_no_input_timer_started_ = true;
+    esp_timer_start_once(proactive_no_input_timer_handle_, PROACTIVE_NO_INPUT_TIMEOUT_US);
+    ESP_LOGI(TAG, "Proactive no-input timer started");
+}
+
+void Application::StopProactiveNoInputTimer() {
+    if (proactive_no_input_timer_handle_ && proactive_sales_no_input_timer_started_) {
+        esp_timer_stop(proactive_no_input_timer_handle_);
+    }
+    proactive_sales_no_input_timer_started_ = false;
+}
+
+void Application::ResetProactiveSalesSession() {
+    StopProactiveNoInputTimer();
+    proactive_sales_session_active_ = false;
+    proactive_sales_customer_present_ = false;
+    proactive_sales_greeting_pending_ = false;
+    proactive_sales_greeting_tts_started_ = false;
+}
+
+void Application::MarkProactiveSalesUserInput() {
+    if (!proactive_sales_session_active_) {
+        return;
+    }
+
+    StartProactiveNoInputTimer(true);
+}
+
 void Application::SetAecMode(AecMode mode) {
     aec_mode_ = mode;
     Schedule([this]() {
@@ -1113,4 +1304,3 @@ void Application::ResetProtocol() {
         protocol_.reset();
     });
 }
-

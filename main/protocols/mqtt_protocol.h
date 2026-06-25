@@ -52,10 +52,12 @@ private:
     uint32_t local_sequence_;
     uint32_t remote_sequence_;
     esp_timer_handle_t reconnect_timer_;
+    esp_timer_handle_t audio_probe_timer_ = nullptr;
 
     bool StartMqttClient(bool report_error=false);
     void ParseServerHello(const cJSON* root);
     std::string DecodeHexString(const std::string& hex_string);
+    void SendUdpAudioProbeLocked();
 
     bool SendText(const std::string& text) override;
     std::string GetHelloMessage();
