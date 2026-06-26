@@ -143,54 +143,67 @@ private:
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting) {
                 EnterWifiConfigMode();
+                return;
             }
-        });
-        boot_button_.OnPressDown([this]() {
-            Application::GetInstance().StartListening();
-        });
-        boot_button_.OnPressUp([this]() {
-            Application::GetInstance().StopListening();
-        });
-        volume_up_button_.OnClick([this]() {
+
             auto codec = GetAudioCodec();
-            // auto volume = codec->output_volume() + 10;
-            // if (volume > 100) {
-            //     volume = 100;
-            // }
-            // codec->SetOutputVolume(volume);
-            // GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-            auto gain = codec->input_gain() + 5.0f;
+            auto gain = codec->input_gain() + 10.0f;
             if (gain > 100.0f) {
                 gain = 100.0f;
             }
             codec->SetInputGain(gain);
             ESP_LOGI(TAG, "Input gain set to: %f", gain);
         });
-
-        volume_up_button_.OnLongPress([this]() {
-            GetAudioCodec()->SetOutputVolume(100);
-            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
-        });
-
-        volume_down_button_.OnClick([this]() {
+        boot_button_.OnDoubleClick([this]() {
             auto codec = GetAudioCodec();
-            // auto volume = codec->output_volume() - 10;
-            // if (volume < 0) {
-            //     volume = 0;
-            // }
-            // codec->SetOutputVolume(volume);
-            // GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
-            auto gain = codec->input_gain() - 5.0f;
+            auto gain = codec->input_gain() - 10.0f;
             if (gain < 0.0f) {
                 gain = 0.0f;
             }
             codec->SetInputGain(gain);
             ESP_LOGI(TAG, "Input gain set to: %f", gain);
         });
+        boot_button_.OnLongPress([this]() {
+            auto& app = Application::GetInstance();
+            if (app.GetAecMode() != AecMode::kAecOff) {
+                app.SetAecMode(AecMode::kAecOff);
+                ESP_LOGI(TAG, "AEC mode set to OFF");
+            } else {
+                app.SetAecMode(AecMode::kAecOnDeviceSide);
+                ESP_LOGI(TAG, "AEC mode set to ON");
+            }
+        });
 
+        volume_up_button_.OnClick([this]() {
+            auto codec = GetAudioCodec();
+            auto volume = codec->output_volume() + 10;
+            if (volume > 100) {
+                volume = 100;
+            }
+            codec->SetOutputVolume(volume);
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
+            ESP_LOGI(TAG, "Output volume set to: %d", volume);
+        });
+        volume_up_button_.OnLongPress([this]() {
+            GetAudioCodec()->SetOutputVolume(100);
+            GetDisplay()->ShowNotification(Lang::Strings::MAX_VOLUME);
+            ESP_LOGI(TAG, "Output volume set to: %d", 100);
+        });
+
+        volume_down_button_.OnClick([this]() {
+            auto codec = GetAudioCodec();
+            auto volume = codec->output_volume() - 10;
+            if (volume < 0) {
+                volume = 0;
+            }
+            codec->SetOutputVolume(volume);
+            GetDisplay()->ShowNotification(Lang::Strings::VOLUME + std::to_string(volume));
+            ESP_LOGI(TAG, "Output volume set to: %d", volume);
+        });
         volume_down_button_.OnLongPress([this]() {
             GetAudioCodec()->SetOutputVolume(0);
             GetDisplay()->ShowNotification(Lang::Strings::MUTED); 
+            ESP_LOGI(TAG, "Output volume set to: %d", 0);
         });
     }
 
@@ -334,43 +347,8 @@ private:
                                      DISPLAY_WIDTH, DISPLAY_HEIGHT, DISPLAY_OFFSET_X, DISPLAY_OFFSET_Y, DISPLAY_MIRROR_X, DISPLAY_MIRROR_Y, DISPLAY_SWAP_XY);
     }
 
-    void InitializeTools()
-    {
-        auto& mcp_server = McpServer::GetInstance();
-        mcp_server.AddTool(
-        "self.AEC.set_mode", 
-        "设置AEC对话打断模式。当用户意图切换AEC模式时使用此工具。\n"
-        "参数：\n"
-        "   `mode`: 对话打断模式，可选值只有`kAecOff`(关闭）和`kAecOnDeviceSide`（开启）\n"
-        "返回值：\n"
-        "   反馈状态信息，不需要确认，立即播报相关数据\n",
-        PropertyList({
-            Property("mode", kPropertyTypeString)
-        }), 
-        [](const PropertyList& properties) -> ReturnValue {
-            auto mode = properties["mode"].value<std::string>();
-            auto& app = Application::GetInstance();
-            vTaskDelay(pdMS_TO_TICKS(2000));
-            if (mode == "kAecOff") {
-                app.SetAecMode(kAecOff);
-                ESP_LOGI(TAG, "AEC对话打断模式已关闭");
-                return "{\"success\": true, \"message\": \"AEC对话打断模式已关闭\"}";
-            }else {
-                app.SetAecMode(kAecOnDeviceSide);
-                ESP_LOGI(TAG, "AEC对话打断模式已开启");
-                return "{\"success\": true, \"message\": \"AEC对话打断模式已开启\"}";
-            }
-        });
-        mcp_server.AddUserOnlyTool("self.audio_speaker.set_gain", 
-            "设置麦克风输入增益，范围0-100",
-            PropertyList({
-                Property("gain", kPropertyTypeInteger, 0, 100)
-            }), 
-            [this](const PropertyList& properties) -> ReturnValue {
-                auto codec = GetAudioCodec();
-                codec->SetInputGain(properties["gain"].value<int>());
-                return true;
-        });
+    void InitializeTools() {
+
     }
 
     void InitializeBatteryAdc()

@@ -306,9 +306,15 @@ std::string WifiBoard::GetDeviceStatusJson() {
     auto audio_speaker = cJSON_CreateObject();
     if (auto codec = board.GetAudioCodec()) {
         cJSON_AddNumberToObject(audio_speaker, "volume", codec->output_volume());
-        cJSON_AddNumberToObject(audio_speaker, "gain", codec->input_gain());
     }
     cJSON_AddItemToObject(root, "audio_speaker", audio_speaker);
+
+    // Audio microphone
+    auto audio_microphone = cJSON_CreateObject();
+    if (auto codec = board.GetAudioCodec()) {
+        cJSON_AddNumberToObject(audio_microphone, "gain", codec->input_gain());
+    }
+    cJSON_AddItemToObject(root, "audio_microphone", audio_microphone);
 
     // Screen
     auto screen = cJSON_CreateObject();
@@ -354,5 +360,6 @@ std::string WifiBoard::GetDeviceStatusJson() {
     std::string result(str);
     cJSON_free(str);
     cJSON_Delete(root);
+    ESP_LOGI(TAG, "Device status JSON: %s", result.c_str());
     return result;
 }

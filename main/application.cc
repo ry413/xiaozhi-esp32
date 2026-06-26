@@ -20,6 +20,19 @@
 #define TAG "Application"
 #define PROACTIVE_NO_INPUT_TIMEOUT_US (30LL * 1000 * 1000)
 
+extern const char greeting_opus_start[] asm("_binary_greeting_opus_start");
+extern const char greeting_opus_end[] asm("_binary_greeting_opus_end");
+static const std::string_view kGreetingAudio {
+    static_cast<const char*>(greeting_opus_start),
+    static_cast<size_t>(greeting_opus_end - greeting_opus_start)
+};
+
+extern const char user_no_input_opus_start[] asm("_binary_userNoInput_opus_start");
+extern const char user_no_input_opus_end[] asm("_binary_userNoInput_opus_end");
+static const std::string_view kUserNoInputAudio {
+    static_cast<const char*>(user_no_input_opus_start),
+    static_cast<size_t>(user_no_input_opus_end - user_no_input_opus_start)
+};
 
 Application::Application() {
     event_group_ = xEventGroupCreate();
@@ -1212,7 +1225,20 @@ void Application::SendProactiveGreeting() {
     }
 
     proactive_sales_greeting_pending_ = false;
-    protocol_->SendDirectMessageToChat("【系统】检测到用户");
+    ESP_LOGI(TAG, "Send proactive greeting audio, bytes=%u", (unsigned)kGreetingAudio.size());
+    audio_service_.EnableVoiceProcessing(false);
+    audio_service_.SendOggToSendQueue(kGreetingAudio);
+    xTaskCreate([](void* arg) {
+        auto app = static_cast<Application*>(arg);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        app->Schedule([app]() {
+            if (app->GetDeviceState() == kDeviceStateListening &&
+                !app->audio_service_.IsAudioProcessorRunning()) {
+                app->audio_service_.EnableVoiceProcessing(true);
+            }
+        });
+        vTaskDelete(NULL);
+    }, "resume_voice", 2048, this, 2, nullptr);
     StartProactiveNoInputTimer();
 }
 
@@ -1221,8 +1247,20 @@ void Application::SendProactiveNoInputPrompt() {
         return;
     }
 
-    ESP_LOGI(TAG, "Send proactive no-input prompt");
-    protocol_->SendDirectMessageToChat("【系统】用户仍在红外检测范围内，但最近30秒没有检测到用户输入。请用简短自然的话继续引导用户。");
+    ESP_LOGI(TAG, "Send proactive no-input audio, bytes=%u", (unsigned)kUserNoInputAudio.size());
+    audio_service_.EnableVoiceProcessing(false);
+    audio_service_.SendOggToSendQueue(kUserNoInputAudio);
+    xTaskCreate([](void* arg) {
+        auto app = static_cast<Application*>(arg);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        app->Schedule([app]() {
+            if (app->GetDeviceState() == kDeviceStateListening &&
+                !app->audio_service_.IsAudioProcessorRunning()) {
+                app->audio_service_.EnableVoiceProcessing(true);
+            }
+        });
+        vTaskDelete(NULL);
+    }, "resume_voice", 2048, this, 2, nullptr);
 }
 
 void Application::StartProactiveNoInputTimer(bool restart) {

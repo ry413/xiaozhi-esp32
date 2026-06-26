@@ -186,6 +186,14 @@ void BoxAudioCodec::SetOutputVolume(int volume) {
     AudioCodec::SetOutputVolume(volume);
 }
 
+void BoxAudioCodec::SetInputGain(float gain) {
+    std::lock_guard<std::mutex> lock(data_if_mutex_);
+    AudioCodec::SetInputGain(gain);
+    if (input_enabled_) {
+        ESP_ERROR_CHECK(esp_codec_dev_set_in_channel_gain(input_dev_, ESP_CODEC_DEV_MAKE_CHANNEL_MASK(0), input_gain_));
+    }
+}
+
 void BoxAudioCodec::EnableInput(bool enable) {
     std::lock_guard<std::mutex> lock(data_if_mutex_);
     if (enable == input_enabled_) {

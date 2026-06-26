@@ -653,6 +653,71 @@ void AudioService::PlaySound(const std::string_view& ogg) {
     demuxer->Process(buf, size);
 }
 
+void AudioService::SendOggToSendQueue(const std::string_view& ogg) {
+    const auto* buf = reinterpret_cast<const uint8_t*>(ogg.data());
+    size_t size = ogg.size();
+    std::vector<std::unique_ptr<AudioStreamPacket>> packets;
+    size_t total_payload_size = 0;
+
+    auto demuxer = std::make_unique<OggDemuxer>();
+    demuxer->OnDemuxerFinished([&packets, &total_payload_size](const uint8_t* data, int sample_rate, size_t size) {
+        auto packet = std::make_unique<AudioStreamPacket>();
+        packet->sample_rate = sample_rate;
+        packet->frame_duration = OPUS_FRAME_DURATION_MS;
+        packet->timestamp = 0;
+        packet->payload.resize(size);
+        std::memcpy(packet->payload.data(), data, size);
+
+        total_payload_size += size;
+        packets.push_back(std::move(packet));
+    });
+    demuxer->Reset();
+    demuxer->Process(buf, size);
+    ESP_LOGI(TAG, "Queued Ogg audio to send queue: input=%u bytes, packets=%u, payload=%u bytes, interval=%dms",
+             (unsigned)size, (unsigned)packets.size(), (unsigned)total_payload_size, OPUS_FRAME_DURATION_MS);
+    if (packets.empty()) {
+        return;
+    }
+
+    struct SendContext {
+        AudioService* service;
+        std::vector<std::unique_ptr<AudioStreamPacket>> packets;
+    };
+    auto context = new SendContext{this, std::move(packets)};
+
+    xTaskCreate([](void* arg) {
+        auto context = static_cast<SendContext*>(arg);
+        auto service = context->service;
+        int64_t start_time = esp_timer_get_time();
+        size_t sent_packets = 0;
+        for (auto& packet : context->packets) {
+            {
+                std::unique_lock<std::mutex> lock(service->audio_queue_mutex_);
+                service->audio_queue_cv_.wait(lock, [service]() {
+                    return service->service_stopped_ ||
+                           service->audio_send_queue_.size() < MAX_SEND_PACKETS_IN_QUEUE;
+                });
+                if (service->service_stopped_) {
+                    break;
+                }
+                service->audio_send_queue_.push_back(std::move(packet));
+            }
+
+            service->audio_queue_cv_.notify_all();
+            if (service->callbacks_.on_send_queue_available) {
+                service->callbacks_.on_send_queue_available();
+            }
+            sent_packets++;
+            vTaskDelay(pdMS_TO_TICKS(OPUS_FRAME_DURATION_MS));
+        }
+        int32_t elapsed_ms = (int32_t)((esp_timer_get_time() - start_time) / 1000);
+        ESP_LOGI(TAG, "Ogg audio send task finished: packets=%u, elapsed=%ldms",
+                 (unsigned)sent_packets, (long)elapsed_ms);
+        delete context;
+        vTaskDelete(NULL);
+    }, "ogg_send", 4096, context, 2, nullptr);
+}
+
 bool AudioService::IsIdle() {
     std::lock_guard<std::mutex> lock(audio_queue_mutex_);
     return audio_encode_queue_.empty() && audio_decode_queue_.empty() && audio_playback_queue_.empty() && audio_testing_queue_.empty();

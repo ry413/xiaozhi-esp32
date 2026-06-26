@@ -33,6 +33,11 @@ void AudioCodec::Start() {
         ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
         output_volume_ = 10;
     }
+    input_gain_ = settings.GetInt("input_gain", input_gain_);
+    if (input_gain_ < 0 || input_gain_ > 100) {
+        ESP_LOGW(TAG, "Input gain value (%.1f) is out of range [0, 100], setting to default (30)", input_gain_);
+        input_gain_ = 30;
+    }
 
     ESP_LOGI(TAG, "Audio codec started");
 }
@@ -46,8 +51,16 @@ void AudioCodec::SetOutputVolume(int volume) {
 }
 
 void AudioCodec::SetInputGain(float gain) {
+    if (gain < 0.0f) {
+        gain = 0.0f;
+    } else if (gain > 100.0f) {
+        gain = 100.0f;
+    }
     input_gain_ = gain;
     ESP_LOGI(TAG, "Set input gain to %.1f", input_gain_);
+
+    Settings settings("audio", true);
+    settings.SetInt("input_gain", static_cast<int>(input_gain_));
 }
 
 void AudioCodec::EnableInput(bool enable) {
