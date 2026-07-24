@@ -209,13 +209,20 @@ void McpServer::AddUserOnlyTools() {
     AddUserOnlyTool("self.direct_chat",
             "直接向后端LLM发送消息",
             PropertyList({
-                Property("message", kPropertyTypeString)
+                Property("message", kPropertyTypeString),
+                Property("can_cache", kPropertyTypeBoolean, false),
+                Property("cache_version", kPropertyTypeString),
+                Property("can_use_recording", kPropertyTypeBoolean, false)
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 auto message = properties["message"].value<std::string>();
-                ESP_LOGI(TAG, "Direct chat message: %s", message.c_str());
+                bool can_cache = properties["can_cache"].value<bool>();
+                std::string cache_version = properties["cache_version"].value<std::string>();
+                bool can_use_recording = properties["can_use_recording"].value<bool>();
+
+                ESP_LOGI(TAG, "Direct chat message: %s, can_cache: %d, cache_version: %s, can_use_recording: %d", message.c_str(), can_cache, cache_version.c_str(), can_use_recording);
                 auto& app = Application::GetInstance();
-                app.SendDirectMessageToChat(message);
+                app.SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording);
                 return true;
         });
 

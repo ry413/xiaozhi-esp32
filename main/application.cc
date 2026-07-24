@@ -544,7 +544,18 @@ void Application::InitializeProtocol() {
                     if (haveValidThaloraInstance_.load()) {
                         if (GetDeviceState() == kDeviceStateSpeaking) {
                             SetDeviceState(kDeviceStateIdle);
-                            StartAllowSendPromptTask("tts_stop");
+                            thalora_direct_chat_in_flight_ = false;
+                            if (!pending_direct_chat_messages_.empty()) {
+                                auto pending = std::move(pending_direct_chat_messages_.front());
+                                pending_direct_chat_messages_.pop_front();
+                                ESP_LOGI(TAG, "Sending queued direct chat, remaining=%u",
+                                    static_cast<unsigned>(pending_direct_chat_messages_.size()));
+                                SendDirectMessageToChatNow(
+                                    pending.message, pending.can_cache, pending.cache_version,
+                                    pending.can_use_recording);
+                            } else {
+                                StartAllowSendPromptTask("tts_stop");
+                            }
                         }
                     }
                     // 原来的路径
@@ -1126,12 +1137,35 @@ void Application::SendMcpMessage(const std::string& payload) {
     });
 }
 
-void Application::SendDirectMessageToChat(const std::string& message) {
-    Schedule([this, message = std::move(message)]() {
-        if (protocol_ && protocol_->IsAudioChannelOpened()) {
-            protocol_->SendDirectMessageToChat(message);
+void Application::SendDirectMessageToChat(const std::string& message, bool can_cache,
+                                          const std::string& cache_version,
+                                          bool can_use_recording) {
+    Schedule([this, message, can_cache, cache_version, can_use_recording]() {
+        if (haveValidThaloraInstance_.load() &&
+            (thalora_direct_chat_in_flight_ || GetDeviceState() == kDeviceStateSpeaking)) {
+            pending_direct_chat_messages_.push_back(
+                {message, can_cache, cache_version, can_use_recording});
+            ESP_LOGI(TAG, "Queued direct chat while Thalora is busy, pending=%u",
+                static_cast<unsigned>(pending_direct_chat_messages_.size()));
+            return;
         }
+
+        SendDirectMessageToChatNow(message, can_cache, cache_version, can_use_recording);
     });
+}
+
+bool Application::SendDirectMessageToChatNow(const std::string& message, bool can_cache,
+                                             const std::string& cache_version,
+                                             bool can_use_recording) {
+    if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
+        return false;
+    }
+
+    protocol_->SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording);
+    if (haveValidThaloraInstance_.load()) {
+        thalora_direct_chat_in_flight_ = true;
+    }
+    return true;
 }
 
 void Application::SetAecMode(AecMode mode) {
@@ -1181,10 +1215,14 @@ void Application::AutoStartThalora() {
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(1);
-    http->SetContent(std::string{});
+    std::string request_body;
+    http->SetContent(std::string(request_body));
 
     // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/auto-start/" + SystemInfo::GetMacAddress())) {
-    if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/auto-start/" + SystemInfo::GetMacAddress())) {
+    // if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/auto-start/" + SystemInfo::GetMacAddress())) {
+    // std::string url = "http://192.168.1.42:8002/xiaozhi/liveStreaming/device/auto-start/" + SystemInfo::GetMacAddress();
+    std::string url = "https://ry.xiaozhuiot.cn/xiaozhi/liveStreaming/device/auto-start/" + SystemInfo::GetMacAddress();
+    if (!http->Open("POST", url)) {
         ESP_LOGE(TAG, "Failed to open allow prompt URL");
         return;
     }
@@ -1248,6 +1286,8 @@ void Application::AutoStartThalora() {
                 if (app->GetDeviceState() == kDeviceStateIdle) {
                     app->ToggleChatState();
                 }
+                // 也许还是要等一下, 不然提示词模板还没加载
+                vTaskDelay(pdMS_TO_TICKS(2000));
                 app->AllowSendPrompt();
 
                 // 关闭麦克风
@@ -1375,6 +1415,8 @@ void Application::StartThaloraRecoveryTask(const char* reason) {
             }
             app->haveValidThaloraInstance_.store(false);
             app->allow_send_prompt_task_handle_ = nullptr;
+            app->thalora_direct_chat_in_flight_ = false;
+            app->pending_direct_chat_messages_.clear();
 
             if (state != kDeviceStateStarting && state != kDeviceStateActivating &&
                 state != kDeviceStateWifiConfiguring && state != kDeviceStateAudioTesting &&
@@ -1402,10 +1444,14 @@ esp_err_t Application::AllowSendPrompt() {
     auto& board = Board::GetInstance();
     auto network = board.GetNetwork();
     auto http = network->CreateHttp(1);
-    http->SetContent(std::string{});
+    std::string request_body;
+    http->SetContent(std::string(request_body));
 
     // if (!http->Open("POST", "http://192.168.1.42:18080/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
-    if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
+    // if (!http->Open("POST", "https://ry.xiaozhuiot.cn/douyinFetcher/monitors/allow-prompt/" + SystemInfo::GetMacAddress())) {
+    // std::string url = "http://192.168.1.42:8002/xiaozhi/liveStreaming/device/allow-prompt/" + SystemInfo::GetMacAddress();
+    std::string url = "https://ry.xiaozhuiot.cn/xiaozhi/liveStreaming/device/allow-prompt/" + SystemInfo::GetMacAddress();
+    if (!http->Open("POST", url)) {
         ESP_LOGE(TAG, "Failed to open allow prompt URL");
         return ESP_FAIL;
     }

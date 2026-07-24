@@ -110,7 +110,8 @@ public:
     bool UpgradeFirmware(const std::string& url, const std::string& version = "");
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
-    void SendDirectMessageToChat(const std::string& message);
+    void SendDirectMessageToChat(const std::string& message, bool can_cache,
+                                 const std::string& cache_version, bool can_use_recording);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
@@ -153,6 +154,14 @@ private:
     TaskHandle_t thalora_recovery_task_handle_ = nullptr;
     std::atomic<int64_t> last_allow_send_prompt_time_us_{0};
     std::atomic<bool> reconnecting_audio_channel_{false};
+    struct PendingDirectChat {
+        std::string message;
+        bool can_cache;
+        std::string cache_version;
+        bool can_use_recording;
+    };
+    std::deque<PendingDirectChat> pending_direct_chat_messages_;
+    bool thalora_direct_chat_in_flight_ = false;
 
 
     // Event handlers
@@ -167,6 +176,8 @@ private:
     void ContinueOpenAudioChannel(ListeningMode mode);
     void ContinueWakeWordInvoke(const std::string& wake_word);
     void StartAllowSendPromptTask(const char* reason);
+    bool SendDirectMessageToChatNow(const std::string& message, bool can_cache,
+                                    const std::string& cache_version, bool can_use_recording);
     void StartThaloraWatchdog();
     void StartThaloraRecoveryTask(const char* reason);
 
