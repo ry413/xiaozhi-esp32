@@ -29,14 +29,14 @@ private:
     PressToTalkMcpTool* press_to_talk_tool_ = nullptr;
 
     void InitializePowerSaveTimer() {
-        power_save_timer_ = new PowerSaveTimer(160, 300);
+        // Keep the display and device awake indefinitely.
+        power_save_timer_ = new PowerSaveTimer(160, -1, -1);
         power_save_timer_->OnEnterSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(true);
         });
         power_save_timer_->OnExitSleepMode([this]() {
             GetDisplay()->SetPowerSaveMode(false);
         });
-        power_save_timer_->SetEnabled(true);
     }
 
     void InitializeCodecI2c() {
