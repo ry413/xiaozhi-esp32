@@ -178,6 +178,7 @@ private:
     void StartAllowSendPromptTask(const char* reason);
     bool SendDirectMessageToChatNow(const std::string& message, bool can_cache,
                                     const std::string& cache_version, bool can_use_recording);
+    bool SendNextPendingDirectChat();
     void StartThaloraWatchdog();
     void StartThaloraRecoveryTask(const char* reason);
 
