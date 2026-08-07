@@ -718,6 +718,15 @@ def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, proj
     """
     if not default_emoji_collection:
         return None
+
+    # Allow boards to keep their emoji collection in a project-owned directory.
+    if os.path.isdir(default_emoji_collection):
+        return os.path.abspath(default_emoji_collection)
+
+    if project_root:
+        project_emoji_path = os.path.join(project_root, default_emoji_collection)
+        if os.path.isdir(project_emoji_path):
+            return project_emoji_path
     
     # Special handling for otto-gif collection
     if default_emoji_collection == 'otto-gif':
@@ -743,7 +752,7 @@ def get_emoji_collection_path(default_emoji_collection, xiaozhi_fonts_path, proj
     if os.path.exists(emoji_path):
         return emoji_path
     
-    print(f"Warning: Emoji collection directory not found in png/ or gif/: {default_emoji_collection}")
+    print(f"Warning: Emoji collection directory not found: {default_emoji_collection}")
     return None
 
 

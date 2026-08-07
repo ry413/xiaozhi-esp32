@@ -800,7 +800,7 @@ elseif(CONFIG_BOARD_TYPE_XIAOZHU3)
     set(BOARD_TYPE "xiaozhu3")
     set(BUILTIN_TEXT_FONT font_puhui_basic_20_4)
     set(BUILTIN_ICON_FONT font_awesome_20_4)
-    set(DEFAULT_EMOJI_COLLECTION twemoji_64)
+    set(DEFAULT_EMOJI_COLLECTION "${CMAKE_CURRENT_SOURCE_DIR}/boards/xiaozhu3/assets/emoji")
 endif()
 
 if(MANUFACTURER)
@@ -1104,6 +1104,15 @@ function(build_default_assets_bin)
         list(APPEND BUILD_ARGS "--extra_files" "${DEFAULT_ASSETS_EXTRA_FILES}")
     endif()
 
+    set(DEFAULT_ASSETS_DEPENDS "")
+    if(DEFAULT_EMOJI_COLLECTION AND IS_DIRECTORY "${DEFAULT_EMOJI_COLLECTION}")
+        file(GLOB_RECURSE DEFAULT_EMOJI_FILES CONFIGURE_DEPENDS
+            "${DEFAULT_EMOJI_COLLECTION}/*.png"
+            "${DEFAULT_EMOJI_COLLECTION}/*.gif"
+        )
+        list(APPEND DEFAULT_ASSETS_DEPENDS ${DEFAULT_EMOJI_FILES})
+    endif()
+
     list(APPEND BUILD_ARGS "--esp_sr_model_path" "${ESP_SR_MODEL_PATH}")
     list(APPEND BUILD_ARGS "--xiaozhi_fonts_path" "${XIAOZHI_FONTS_PATH}")
 
@@ -1114,6 +1123,7 @@ function(build_default_assets_bin)
         DEPENDS
             ${SDKCONFIG}
             ${PROJECT_DIR}/scripts/build_default_assets.py
+            ${DEFAULT_ASSETS_DEPENDS}
         COMMENT "Building default assets.bin based on configuration"
         VERBATIM
     )
