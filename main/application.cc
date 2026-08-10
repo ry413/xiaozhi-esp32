@@ -330,11 +330,21 @@ void Application::ActivationTask() {
     // Create OTA object for activation process
     ota_ = std::make_unique<Ota>();
 
-    // Check for new assets version
-    CheckAssetsVersion();
-
     // Check for new firmware version
     CheckNewVersion();
+
+    // The OTA response may contain a resource update. Stage it before checking assets.
+    if (!ota_->GetAssetsVersion().empty() && !ota_->GetAssetsUrl().empty()) {
+        Settings settings("assets", true);
+        std::string installed_version = settings.GetString("version");
+        if (installed_version != ota_->GetAssetsVersion()) {
+            settings.SetString("download_url", ota_->GetAssetsUrl());
+            settings.SetString("pending_version", ota_->GetAssetsVersion());
+        }
+    }
+
+    // Check for new assets version
+    CheckAssetsVersion();
 
     // Initialize the protocol
     InitializeProtocol();
@@ -364,8 +374,6 @@ void Application::CheckAssetsVersion() {
     std::string download_url = settings.GetString("download_url");
 
     if (!download_url.empty()) {
-        settings.EraseKey("download_url");
-
         char message[256];
         snprintf(message, sizeof(message), Lang::Strings::FOUND_NEW_ASSETS, download_url.c_str());
         Alert(Lang::Strings::LOADING_ASSETS, message, "cloud_arrow_down", Lang::Sounds::OGG_UPGRADE);
@@ -393,6 +401,13 @@ void Application::CheckAssetsVersion() {
             SetDeviceState(kDeviceStateActivating);
             return;
         }
+
+        std::string pending_version = settings.GetString("pending_version");
+        if (!pending_version.empty()) {
+            settings.SetString("version", pending_version);
+            settings.EraseKey("pending_version");
+        }
+        settings.EraseKey("download_url");
     }
 
     // Apply assets

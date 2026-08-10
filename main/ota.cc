@@ -240,6 +240,18 @@ esp_err_t Ota::CheckVersion() {
         ESP_LOGW(TAG, "No firmware section found!");
     }
 
+    assets_version_.clear();
+    assets_url_.clear();
+    cJSON *assets = cJSON_GetObjectItem(root, "assets");
+    if (cJSON_IsObject(assets)) {
+        cJSON *version = cJSON_GetObjectItem(assets, "version");
+        cJSON *url = cJSON_GetObjectItem(assets, "url");
+        if (cJSON_IsString(version) && cJSON_IsString(url)) {
+            assets_version_ = version->valuestring;
+            assets_url_ = url->valuestring;
+        }
+    }
+
     cJSON_Delete(root);
     return ESP_OK;
 }
