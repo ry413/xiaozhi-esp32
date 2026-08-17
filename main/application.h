@@ -161,7 +161,6 @@ private:
         bool can_use_recording;
     };
     std::deque<PendingDirectChat> pending_direct_chat_messages_;
-    bool thalora_direct_chat_in_flight_ = false;
 
 
     // Event handlers
@@ -178,7 +177,7 @@ private:
     void StartAllowSendPromptTask(const char* reason);
     bool SendDirectMessageToChatNow(const std::string& message, bool can_cache,
                                     const std::string& cache_version, bool can_use_recording);
-    bool SendNextPendingDirectChat();
+    void SendPendingDirectChats();
     void StartThaloraWatchdog();
     void StartThaloraRecoveryTask(const char* reason);
 

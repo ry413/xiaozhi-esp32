@@ -554,13 +554,17 @@ void Application::InitializeProtocol() {
                     SetDeviceState(kDeviceStateSpeaking);
                 });
             } else if (strcmp(state->valuestring, "stop") == 0) {
-                Schedule([this]() {
+                auto reason = cJSON_GetObjectItem(root, "reason");
+                bool direct_chat_interrupted = cJSON_IsString(reason) &&
+                    strcmp(reason->valuestring, "direct_chat_interrupted") == 0;
+                Schedule([this, direct_chat_interrupted]() {
                     // 如果有有效的实例就拦截这条路
                     if (haveValidThaloraInstance_.load()) {
                         if (GetDeviceState() == kDeviceStateSpeaking) {
                             SetDeviceState(kDeviceStateIdle);
-                            thalora_direct_chat_in_flight_ = false;
-                            if (!SendNextPendingDirectChat()) {
+                            if (direct_chat_interrupted) {
+                                ESP_LOGI(TAG, "Direct chat interrupted current TTS; keep prompt dispatch locked");
+                            } else {
                                 StartAllowSendPromptTask("tts_stop");
                             }
                         }
@@ -730,11 +734,6 @@ void Application::ReconnectAudioChannel() {
             AbortSpeaking(kAbortReasonNone);
         }
 
-        if (haveValidThaloraInstance_.load()) {
-            // Reconnect abandons the current TTS turn, so no matching tts.stop is expected.
-            thalora_direct_chat_in_flight_ = false;
-        }
-
         if (protocol_->IsAudioChannelOpened()) {
             reconnecting_audio_channel_.store(true);
             protocol_->CloseAudioChannel();
@@ -801,7 +800,7 @@ void Application::ContinueOpenAudioChannel(ListeningMode mode) {
 
     SetListeningMode(mode);
     if (haveValidThaloraInstance_.load()) {
-        SendNextPendingDirectChat();
+        SendPendingDirectChats();
     }
 }
 
@@ -1157,11 +1156,10 @@ void Application::SendDirectMessageToChat(const std::string& message, bool can_c
                                           bool can_use_recording) {
     Schedule([this, message, can_cache, cache_version, can_use_recording]() {
         if (haveValidThaloraInstance_.load() &&
-            (thalora_direct_chat_in_flight_ || GetDeviceState() == kDeviceStateSpeaking ||
-             !protocol_ || !protocol_->IsAudioChannelOpened())) {
+            (!protocol_ || !protocol_->IsAudioChannelOpened())) {
             pending_direct_chat_messages_.push_back(
                 {message, can_cache, cache_version, can_use_recording});
-            ESP_LOGI(TAG, "Queued direct chat while Thalora is busy, pending=%u",
+            ESP_LOGI(TAG, "Queued direct chat while audio channel is unavailable, pending=%u",
                 static_cast<unsigned>(pending_direct_chat_messages_.size()));
             return;
         }
@@ -1178,28 +1176,22 @@ bool Application::SendDirectMessageToChatNow(const std::string& message, bool ca
     }
 
     protocol_->SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording);
-    if (haveValidThaloraInstance_.load()) {
-        thalora_direct_chat_in_flight_ = true;
-    }
     return true;
 }
 
-bool Application::SendNextPendingDirectChat() {
-    if (thalora_direct_chat_in_flight_ || pending_direct_chat_messages_.empty()) {
-        return false;
-    }
+void Application::SendPendingDirectChats() {
+    while (!pending_direct_chat_messages_.empty()) {
+        auto& pending = pending_direct_chat_messages_.front();
+        if (!SendDirectMessageToChatNow(
+                pending.message, pending.can_cache, pending.cache_version,
+                pending.can_use_recording)) {
+            return;
+        }
 
-    auto& pending = pending_direct_chat_messages_.front();
-    if (!SendDirectMessageToChatNow(
-            pending.message, pending.can_cache, pending.cache_version,
-            pending.can_use_recording)) {
-        return false;
+        pending_direct_chat_messages_.pop_front();
+        ESP_LOGI(TAG, "Sent queued direct chat after reconnect, remaining=%u",
+            static_cast<unsigned>(pending_direct_chat_messages_.size()));
     }
-
-    pending_direct_chat_messages_.pop_front();
-    ESP_LOGI(TAG, "Sent queued direct chat, remaining=%u",
-        static_cast<unsigned>(pending_direct_chat_messages_.size()));
-    return true;
 }
 
 void Application::SetAecMode(AecMode mode) {
@@ -1449,7 +1441,6 @@ void Application::StartThaloraRecoveryTask(const char* reason) {
             }
             app->haveValidThaloraInstance_.store(false);
             app->allow_send_prompt_task_handle_ = nullptr;
-            app->thalora_direct_chat_in_flight_ = false;
             app->pending_direct_chat_messages_.clear();
 
             if (state != kDeviceStateStarting && state != kDeviceStateActivating &&
