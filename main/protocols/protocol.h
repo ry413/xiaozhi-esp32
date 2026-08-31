@@ -74,7 +74,9 @@ public:
     virtual void SendAbortSpeaking(AbortReason reason);
     virtual void SendMcpMessage(const std::string& message);
     virtual void SendDirectMessageToChat(const std::string& message, bool can_cache,
-                                         const std::string& cache_version, bool can_use_recording);
+                                         const std::string& cache_version, bool can_use_recording,
+                                         const std::string& prepared_id,
+                                         const std::string& prefetch_json);
 
 protected:
     std::function<void(const cJSON* root)> on_incoming_json_;

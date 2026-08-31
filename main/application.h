@@ -111,7 +111,9 @@ public:
     bool CanEnterSleepMode();
     void SendMcpMessage(const std::string& payload);
     void SendDirectMessageToChat(const std::string& message, bool can_cache,
-                                 const std::string& cache_version, bool can_use_recording);
+                                 const std::string& cache_version, bool can_use_recording,
+                                 const std::string& prepared_id,
+                                 const std::string& prefetch_json);
     void SetAecMode(AecMode mode);
     AecMode GetAecMode() const { return aec_mode_; }
     void PlaySound(const std::string_view& sound);
@@ -159,6 +161,8 @@ private:
         bool can_cache;
         std::string cache_version;
         bool can_use_recording;
+        std::string prepared_id;
+        std::string prefetch_json;
     };
     std::deque<PendingDirectChat> pending_direct_chat_messages_;
 
@@ -176,7 +180,9 @@ private:
     void ContinueWakeWordInvoke(const std::string& wake_word);
     void StartAllowSendPromptTask(const char* reason);
     bool SendDirectMessageToChatNow(const std::string& message, bool can_cache,
-                                    const std::string& cache_version, bool can_use_recording);
+                                    const std::string& cache_version, bool can_use_recording,
+                                    const std::string& prepared_id,
+                                    const std::string& prefetch_json);
     void SendPendingDirectChats();
     void StartThaloraWatchdog();
     void StartThaloraRecoveryTask(const char* reason);

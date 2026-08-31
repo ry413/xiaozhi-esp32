@@ -212,17 +212,23 @@ void McpServer::AddUserOnlyTools() {
                 Property("message", kPropertyTypeString),
                 Property("can_cache", kPropertyTypeBoolean, false),
                 Property("cache_version", kPropertyTypeString),
-                Property("can_use_recording", kPropertyTypeBoolean, false)
+                Property("can_use_recording", kPropertyTypeBoolean, false),
+                Property("prepared_id", kPropertyTypeString, std::string("")),
+                Property("prefetch_json", kPropertyTypeString, std::string("[]"))
             }),
             [this](const PropertyList& properties) -> ReturnValue {
                 auto message = properties["message"].value<std::string>();
                 bool can_cache = properties["can_cache"].value<bool>();
                 std::string cache_version = properties["cache_version"].value<std::string>();
                 bool can_use_recording = properties["can_use_recording"].value<bool>();
+                std::string prepared_id = properties["prepared_id"].value<std::string>();
+                std::string prefetch_json = properties["prefetch_json"].value<std::string>();
 
-                ESP_LOGI(TAG, "Direct chat message: %s, can_cache: %d, cache_version: %s, can_use_recording: %d", message.c_str(), can_cache, cache_version.c_str(), can_use_recording);
+                ESP_LOGI(TAG, "Direct chat message: %s, can_cache: %d, cache_version: %s, can_use_recording: %d, prepared_id: %s, prefetch_bytes: %u", message.c_str(), can_cache, cache_version.c_str(), can_use_recording, prepared_id.c_str(), static_cast<unsigned>(prefetch_json.size()));
                 auto& app = Application::GetInstance();
-                app.SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording);
+                app.SendDirectMessageToChat(message, can_cache, cache_version,
+                                            can_use_recording, prepared_id,
+                                            prefetch_json);
                 return true;
         });
 

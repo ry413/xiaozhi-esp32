@@ -1153,29 +1153,37 @@ void Application::SendMcpMessage(const std::string& payload) {
 
 void Application::SendDirectMessageToChat(const std::string& message, bool can_cache,
                                           const std::string& cache_version,
-                                          bool can_use_recording) {
-    Schedule([this, message, can_cache, cache_version, can_use_recording]() {
+                                          bool can_use_recording,
+                                          const std::string& prepared_id,
+                                          const std::string& prefetch_json) {
+    Schedule([this, message, can_cache, cache_version, can_use_recording,
+              prepared_id, prefetch_json]() {
         if (haveValidThaloraInstance_.load() &&
             (!protocol_ || !protocol_->IsAudioChannelOpened())) {
             pending_direct_chat_messages_.push_back(
-                {message, can_cache, cache_version, can_use_recording});
+                {message, can_cache, cache_version, can_use_recording,
+                 prepared_id, prefetch_json});
             ESP_LOGI(TAG, "Queued direct chat while audio channel is unavailable, pending=%u",
                 static_cast<unsigned>(pending_direct_chat_messages_.size()));
             return;
         }
 
-        SendDirectMessageToChatNow(message, can_cache, cache_version, can_use_recording);
+        SendDirectMessageToChatNow(message, can_cache, cache_version, can_use_recording,
+                                   prepared_id, prefetch_json);
     });
 }
 
 bool Application::SendDirectMessageToChatNow(const std::string& message, bool can_cache,
                                              const std::string& cache_version,
-                                             bool can_use_recording) {
+                                             bool can_use_recording,
+                                             const std::string& prepared_id,
+                                             const std::string& prefetch_json) {
     if (!protocol_ || !protocol_->IsAudioChannelOpened()) {
         return false;
     }
 
-    protocol_->SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording);
+    protocol_->SendDirectMessageToChat(message, can_cache, cache_version, can_use_recording,
+                                       prepared_id, prefetch_json);
     return true;
 }
 
@@ -1184,7 +1192,8 @@ void Application::SendPendingDirectChats() {
         auto& pending = pending_direct_chat_messages_.front();
         if (!SendDirectMessageToChatNow(
                 pending.message, pending.can_cache, pending.cache_version,
-                pending.can_use_recording)) {
+                pending.can_use_recording, pending.prepared_id,
+                pending.prefetch_json)) {
             return;
         }
 

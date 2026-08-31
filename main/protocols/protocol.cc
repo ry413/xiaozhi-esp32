@@ -79,7 +79,9 @@ void Protocol::SendMcpMessage(const std::string& payload) {
 }
 
 void Protocol::SendDirectMessageToChat(const std::string& message, bool can_cache,
-                                       const std::string& cache_version, bool can_use_recording) {
+                                       const std::string& cache_version, bool can_use_recording,
+                                       const std::string& prepared_id,
+                                       const std::string& prefetch_json) {
     cJSON* root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "session_id", session_id_.c_str());
     cJSON_AddStringToObject(root, "type", "direct_chat");
@@ -87,6 +89,8 @@ void Protocol::SendDirectMessageToChat(const std::string& message, bool can_cach
     cJSON_AddBoolToObject(root, "can_cache", can_cache);
     cJSON_AddStringToObject(root, "cache_version", cache_version.c_str());
     cJSON_AddBoolToObject(root, "can_use_recording", can_use_recording);
+    cJSON_AddStringToObject(root, "prepared_id", prepared_id.c_str());
+    cJSON_AddStringToObject(root, "prefetch_json", prefetch_json.c_str());
     char* json_str = cJSON_PrintUnformatted(root);
     std::string text = json_str != nullptr ? json_str : "";
     cJSON_free(json_str);
